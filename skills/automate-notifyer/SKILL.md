@@ -2,15 +2,15 @@
 name: automate-notifyer
 description: >
   Build automation infrastructure on a Notifyer by WhatsAble account — manage WhatsApp
-  message templates, create and configure AI bots for automated chat handling, and create
-  and schedule bulk WhatsApp broadcast campaigns. Use this skill after setup-notifyer has
-  been completed (account authenticated, WhatsApp number connected). Requires the
-  NOTIFYER_API_TOKEN from login.js.
+  message templates, create and configure AI bots for automated chat handling, create
+  and schedule bulk WhatsApp broadcast campaigns, and retrieve messaging analytics and
+  message delivery logs. Use this skill after setup-notifyer has been completed (account
+  authenticated, WhatsApp number connected). Requires NOTIFYER_API_TOKEN from login.js.
 license: Proprietary — © WhatsAble. All rights reserved.
 compatibility: Requires Node.js >= 18. Set NOTIFYER_API_BASE_URL and NOTIFYER_API_TOKEN environment variables before running any script.
 metadata:
   author: whatsable
-  version: "0.1.0"
+  version: "0.2.0"
   product: Notifyer by WhatsAble
   api-base: https://api.insightssystem.com
   depends-on: setup-notifyer
@@ -261,6 +261,40 @@ phone_number,body1,body2
 Phone numbers must NOT include `+`. Variable columns: `body1`, `body2`, `body3`,
 `media`, `button_dynamic_url_value`.
 
+### Get messaging analytics summary
+
+```bash
+node scripts/get-message-analytics.js                        # last 7 days (default)
+node scripts/get-message-analytics.js --days 30              # last 30 days
+node scripts/get-message-analytics.js --from 2025-01-01 --to 2025-01-31
+node scripts/get-message-analytics.js --days 7 --pretty      # human-readable summary
+```
+
+Returns `{ total_sent, sent_count, delivered_count, read_count, read_rate, delivery_rate,
+start_readable_time, end_readable_time, period }`.
+
+- `total_sent` — all messages attempted in the period
+- `sent_count` — confirmed sent by Meta
+- `delivered_count` — confirmed delivered to device
+- `read_count` — opened by recipient
+- `read_rate` / `delivery_rate` — calculated percentages (added by this script)
+
+### Get message logs
+
+```bash
+node scripts/get-message-logs.js                              # all logs, page 1
+node scripts/get-message-logs.js --filter broadcast           # broadcast logs only
+node scripts/get-message-logs.js --filter automation          # automation/API logs only
+node scripts/get-message-logs.js --phone 14155550123          # filter by phone number
+node scripts/get-message-logs.js --filter broadcast --phone 14155550123
+node scripts/get-message-logs.js --page 2 --per-page 10
+node scripts/get-message-logs.js --pretty
+```
+
+Returns `{ logs: LogEntry[], count, total, page, per_page, filter, phone }`.
+Each log has `body`, `phone_number`, `created_at` (Unix ms), `status` (`"sent"` | `"delivered"` | `"read"`).
+Xano returns all matching records — pagination is handled client-side by this script.
+
 ## Rules
 
 ### Templates
@@ -327,6 +361,19 @@ Phone numbers must NOT include `+`. Variable columns: `body1`, `body2`, `body3`,
   in chat, update the recipient record: `PATCH /recipient/:id` with `{ ai_bot_id: <bot_id> }`.
   The chat app fetches bots using **chat auth** (raw token, no Bearer prefix).
 
+### Analytics
+
+- **`anslytics` is the real endpoint path** — the Xano path is `GET /api:5l-RgW1B/anslytics` (typo is in the backend). Do not "correct" the spelling — the request will 404.
+- **`start_timestamp` and `end_timestamp` are text, not integers** — Xano types them as text but expects Unix millisecond values. Pass as strings (e.g. `String(Date.now())`).
+- **`total_sent` vs `sent_count`** — `total_sent` = all messages attempted; `sent_count` = confirmed sent by Meta. These differ when sends fail at the Meta layer. Always check `total_sent` for volume, `sent_count` for confirmed delivery pipeline entry.
+- **`read_rate` and `delivery_rate` are script-calculated** — Xano does not return these. They are added by `get-message-analytics.js` as `read_count / total_sent` and `delivered_count / total_sent`.
+- **No date filter on logs** — `GET /api:ereqLKj6/log` does not accept timestamp parameters. Use `get-message-analytics.js` for time-windowed counts; use `get-message-logs.js` only for per-message detail (filtered by phone and/or type).
+- **Log endpoint requires CORS header** — `GET /api:ereqLKj6/log` runs `/cors_origin_console` as its first step. `get-message-logs.js` sends `Origin: https://console.notifyer-systems.com` automatically.
+- **`phone_number` for logs is integer** — pass without `+` prefix. `get-message-logs.js` strips `+` automatically. Omit `--phone` entirely to get all phones.
+- **Log pagination is client-side** — Xano returns the full array. Use `--page` and `--per-page` in `get-message-logs.js`; defaults are page 1, 20 per page.
+- **Download endpoint returns CSV, not JSON** — `GET /api:5l-RgW1B/download/analytics/details` sets `Content-Type: text/csv`. Use raw `fetch` + `response.text()`. See `references/analytics-reference.md` for a code sample.
+- **Analytics are read-only** — no write or delete operations exist in either analytics API group.
+
 ### Broadcasts
 
 - **All broadcast endpoints require `Origin: https://console.notifyer-systems.com` header** —
@@ -376,6 +423,8 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 | Templates | `/api:AFRA_QCy` | Template create, list, delete |
 | Media Upload | `/api:ox_LN9zX` | Pre-upload media files for non-text templates |
 | Broadcasts | `/api:6_ZYypAc` | Broadcast test, recipient upload, schedule, list, delete, download |
+| Analytics | `/api:5l-RgW1B` | Analytics summary, CSV download, single conversation record |
+| Message Logs | `/api:ereqLKj6` | Message log listing (requires CORS origin header) |
 
 ## Scripts
 
@@ -394,6 +443,8 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 | `scripts/list-broadcasts.js` | `GET /api:6_ZYypAc/broadcast?require=…` — list broadcasts by status: upcoming, previous, or ongoing |
 | `scripts/get-broadcast.js` | fetch-then-filter — retrieve a single broadcast by id, name, or broadcast_identifier |
 | `scripts/create-broadcast.js` | 3-step flow: broadcast_test → upload CSV → broadcast_schedule — create and schedule a broadcast |
+| `scripts/get-message-analytics.js` | `GET /api:5l-RgW1B/anslytics` — analytics summary (total sent, delivered, read, rates) for a date range |
+| `scripts/get-message-logs.js` | `GET /api:ereqLKj6/log` — message logs with optional phone and type filter; client-side pagination |
 <!-- FILE MAP END -->
 
 ## References
@@ -401,6 +452,7 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 - `references/templates-reference.md` — Template data model, all endpoints, name rules, categories, media upload, button shapes, status lifecycle, body variables
 - `references/bots-reference.md` — AI Bot data model, all CRUD endpoints, OpenAI integration, file upload, set-as-default, plan requirements, bot-assignment in chat
 - `references/broadcasts-reference.md` — Full 3-step broadcast workflow, all `/api:6_ZYypAc` endpoints, data model, delivery modes, CSV format, timezone handling, download endpoint
+- `references/analytics-reference.md` — Analytics summary and log API endpoints, response shapes, date range conventions, download CSV usage, limitations
 
 ## Assets
 
@@ -413,8 +465,8 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 [automate-notifyer file map]|root: .
 |.:{package.json,SKILL.md}
 |assets:{broadcast-create-example.json,recipients-example.csv,template-create-example.json}
-|references:{bots-reference.md,broadcasts-reference.md,templates-reference.md}
-|scripts:{create-bot.js,create-broadcast.js,create-template.js,get-bot.js,get-broadcast.js,get-template.js,list-bots.js,list-broadcasts.js,list-templates.js}
+|references:{analytics-reference.md,bots-reference.md,broadcasts-reference.md,templates-reference.md}
+|scripts:{create-bot.js,create-broadcast.js,create-template.js,get-bot.js,get-broadcast.js,get-message-analytics.js,get-message-logs.js,get-template.js,list-bots.js,list-broadcasts.js,list-templates.js}
 |scripts/lib:{args.js,notifyer-api.js,result.js}
 ```
 <!-- FILEMAP:END -->
