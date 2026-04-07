@@ -36,16 +36,28 @@ The `components` array contains the full WhatsApp template definition including:
 
 ## Endpoints
 
-### List all templates
+### List all templates — Console (recommended)
 
 **GET `/api:AFRA_QCy/templates_web`**
 
-Returns all templates for the workspace. No server-side pagination or filters — all
-filtering is done client-side.
+Returns all templates for the workspace.
 
-**Auth:** Bearer console token
+**Auth:** `Authorization: Bearer <jwt>` (console auth — `NOTIFYER_API_TOKEN`)
 
-**Response:** `Template[]` (direct array)
+**Xano function stack:**
+1. `cors_origin_console` — sets CORS headers
+2. `/get_user` — resolves user from Bearer token
+3. `Query All Records From template_request` → `var:templates`
+4. **For Each Loop on `var:templates`**: if `template.status == PENDING`:
+   - Fetches `embedded_users` to get WhatsApp credentials
+   - Calls Meta API to get current template status
+   - Saves updated `template_status` and `category` back to `template_request`
+5. `Query All Records From template_request` → final `var:templates`
+
+**Response:** `Template[]` (direct array, returned `As Self`)
+
+**Important side-effect:** Every call auto-syncs all PENDING templates with Meta.
+The returned statuses are always current — no need to poll separately.
 
 **Script:**
 ```bash
@@ -54,6 +66,33 @@ node scripts/list-templates.js --status approved
 node scripts/list-templates.js --category MARKETING
 node scripts/list-templates.js --pretty
 ```
+
+---
+
+### List templates — Developer API variant
+
+**GET `/api:AFRA_QCy/get_templates`** (Auth Required — uses raw api_key)
+
+Same sync behavior as `templates_web`, but authenticates via:
+1. Lambda → extracts `api_key` from `Authorization` header
+2. `Get Record From api_key` → user
+3. `/get_user` Synchronous → user
+
+Not wrapped in a script. Use `list-templates.js` for all management tasks.
+
+---
+
+### List templates — Public variant (api_key, no sync)
+
+**GET `/api:AFRA_QCy/templates`** (Public Endpoint — uses raw api_key)
+
+Simpler variant:
+1. Lambda → extracts `api_key`
+2. `Get Record From api_key` → user
+3. `Query All Records From template_request` → templates
+
+Does **not** sync PENDING templates. Returns `{ templates: [...] }` (keyed response).
+Not wrapped in a script.
 
 ---
 
@@ -68,8 +107,7 @@ Used by the Broadcasts page and TestMessageSender component.
 
 **Response:** `Template[]` (same shape, pre-filtered to approved status)
 
-> This endpoint is not wrapped in a script as `list-templates.js --status approved`
-> achieves the same result client-side.
+> Not wrapped in a script — `list-templates.js --status approved` achieves the same result.
 
 ---
 
@@ -92,7 +130,25 @@ node scripts/get-template.js --whatsapp-id 123456789
 
 Submits a new template for Meta review. Approval typically takes under 60 seconds.
 
-**Auth:** Bearer console token
+**Auth:** `Authorization: Bearer <jwt>` (console auth — `NOTIFYER_API_TOKEN`)
+
+**Xano function stack:**
+1. `/get_user` — resolves user from Bearer token
+2. `Query All Records From template_request` → `var:templates` (checks for duplicate name)
+3. Conditional: if `input.category != AUTHENTICATION` → Lambda `creating_template_payload`; else different Lambda
+4. Lambda → `variable_counts`
+5. Lambda → `formated_template_name`
+6. **Precondition: `var:templates == false`** — fails (HTTP 400) if a template with the same name already exists
+7. Generate UUID → `template_id`
+8. `Get Record From embedded_users` → `get_credentials` (WhatsApp phone credentials)
+9. Lambda → `buttons` (builds Meta API button objects)
+10. Lambda → `request_hit_into_whatsapp` (**calls Meta API** to create the template)
+11. `Get Record From user`
+12. Lambda → `template_creation_report`
+13. `API Request To https://hook.eu1.make.com/...` → Make webhook notification
+14. `Add Record In template_creation_logs`
+15. Lambda → `is_response_data_okay_for_store`
+16. Conditional: if `is_response_data_okay_for_store == true` → `Add Or Edit Record In template_request`
 
 **Request body:**
 
@@ -113,8 +169,32 @@ interface CreateTemplatePayload {
   addSecurityRecommendation?: boolean; // adds "For your security, do not share this code." footer
   codeExpirationMinutes?: number;      // code validity in minutes (default: 10)
   otpButtonText?: string;              // CTA button label (default: "Copy Code")
+
+  // Optional fields (accepted but not required):
+  allow_category_change?: boolean; // Meta's allow_category_change flag (default: omitted)
+  description?: string;            // internal description (not sent to Meta)
 }
 ```
+
+**Response:** `var:request_hit_into_whatsapp` (the raw Meta API response)
+
+The response is whatever WhatsApp's Business API returned for the template creation
+request — NOT an internal Notifyer record. Typical successful response:
+```json
+{
+  "id": "123456789",
+  "status": "PENDING",
+  "category": "MARKETING"
+}
+```
+The template is saved to Notifyer's `template_request` table only if Meta accepted it
+(`is_response_data_okay_for_store == true`). If Meta rejects the payload, the template
+will NOT appear in `list-templates.js` output.
+
+**Duplicate name error:**
+- If a template with the same name already exists, Xano's Precondition at step 6 fires
+- HTTP 400, message: "Precondition Failed"
+- `create-template.js` surfaces this as: `{ ok: false, error: "A template named '...' already exists.", blocked: true }`
 
 **Script:**
 ```bash
@@ -133,17 +213,35 @@ node scripts/create-template.js \
   --type image \
   --media-url "https://example.com/banner.jpg"
 
-# AUTHENTICATION (body auto-generated)
+# AUTHENTICATION (body auto-generated by Xano)
 node scripts/create-template.js \
   --name verify_otp \
   --category AUTHENTICATION \
   --expiry 10
 ```
 
-**Response:** The Xano create response (includes success status and template details).
+After submission, call `list-templates.js` (which auto-syncs PENDING statuses) to check
+when `status` changes from `"PENDING"` to `"approved"` or `"rejected"`.
 
-After submission, poll `get-template.js --name <name>` to check when `status` changes
-from `"pending"` to `"approved"` or `"rejected"`.
+---
+
+### Manual create (embedded signup use only)
+
+**POST `/api:AFRA_QCy/manual_create`** (Public Endpoint)
+
+Low-level endpoint used during the embedded signup flow. Requires a raw Meta
+`access_token` and `whatsapp_id`. Not for general use — managed by the console UI.
+
+**Inputs:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `access_token` | text | Meta user access token |
+| `whatsapp_id` | integer | WhatsApp Business phone number ID |
+| `requested_template` | json | The Meta template creation payload |
+| `user_id` | text | Notifyer user ID |
+| `template_id` | text | Template ID string |
+
+**Response:** `var:request_hit` (Meta API response). Template is stored if `request_hit.status == PENDING`.
 
 ---
 
@@ -325,17 +423,21 @@ the `__self` field maps variable indices to actual runtime values:
 ## Status lifecycle
 
 ```
-submitted → pending → approved   (ready to use)
+submitted → PENDING → approved   (ready to use)
                     ↘ rejected   (must create a new template; cannot edit and re-submit)
 ```
 
-- `pending` — under Meta review; typically resolves in under 60 seconds
+- `PENDING` — under Meta review; Xano stores and checks this status literally as `"PENDING"` (uppercase). Typically resolves in under 60 seconds.
 - `approved` — template can be used in broadcasts, chat sends, and developer API calls
 - `rejected` — template failed Meta review; check `components` for rejection reason
 
-Poll for status after creation:
+**No manual polling needed** — `list-templates.js` auto-syncs all PENDING templates with
+Meta on every call. Simply call it after waiting ~60 seconds to see the updated status:
+
 ```bash
-# Wait a minute, then check:
+# Wait a minute, then list (auto-syncs PENDING status from Meta):
+node scripts/list-templates.js --status approved --pretty
+# Or check a specific template:
 node scripts/get-template.js --name order_confirmation --pretty
 ```
 
@@ -359,17 +461,21 @@ This endpoint is read-only from a management perspective and is not wrapped in a
 ## Workflow: Create and verify a template
 
 ```bash
-# 1. Create the template
+# 1. Create the template (submits to Meta; response is Meta API response)
 node scripts/create-template.js \
   --name order_ready \
   --category UTILITY \
   --body "Hi {{1}}, your order is ready for pickup at {{2}}." \
   --variables '{"1":"Alice","2":"Store #42"}'
 
-# 2. Wait ~60 seconds, then check status
+# 2. Wait ~60 seconds, then list — PENDING templates are auto-synced with Meta
+#    The returned status is live (no separate polling needed)
+node scripts/list-templates.js --pretty
+
+# 3. Or check a specific template by name
 node scripts/get-template.js --name order_ready --pretty
 
-# 3. Once approved, verify it appears in the broadcast-ready list
+# 4. Once approved, verify it appears in the approved list
 node scripts/list-templates.js --status approved --pretty
 
 # 4. To send it via developer API (requires api_key):

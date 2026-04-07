@@ -45,11 +45,17 @@
  *       "approved"  — ready to use in broadcasts and chat sends
  *       "pending"   — under Meta review (usually resolves within 45 seconds)
  *       "rejected"  — failed Meta review; cannot be used for sends; must recreate
+ *   - SIDE EFFECT: Every call to this endpoint auto-syncs PENDING templates with Meta.
+ *     Xano loops over PENDING templates, calls the Meta API for each one to get the
+ *     current status, and saves any changes. This means the returned status is always
+ *     up-to-date — you do NOT need to poll separately for status changes.
  *   - To get a single template by name or ID use get-template.js.
  *   - For broadcast-ready (approved-only) templates use:
  *       GET /api:AFRA_QCy/templates_broadcast_web
  *     The list-templates.js --status approved flag achieves the same client-side.
  *   - Uses console auth mode (Authorization: Bearer <token>).
+ *   - There is also a developer-API variant: GET /api:AFRA_QCy/get_templates (uses raw
+ *     api_key auth, same sync behavior). Not wrapped in a script — use list-templates.js.
  *
  * Environment:
  *   NOTIFYER_API_BASE_URL   required

@@ -329,9 +329,18 @@ Returns `{ ok: true, data: { id, name, email, role, phone_number, ... } }`.
 
 ## Rules
 
+- **`list-templates.js` auto-syncs PENDING statuses** — every call to
+  `GET /api:AFRA_QCy/templates_web` loops over all PENDING templates, calls the Meta API
+  for each one, and saves the updated status. The returned list is always live. No manual
+  polling is needed — just call `list-templates.js` ~60 seconds after creating a template.
+- **`create-template.js` response is the Meta API response** — the create endpoint returns
+  `var:request_hit_into_whatsapp`, which is the raw WhatsApp Business API response (not a
+  Notifyer internal record). The template is only stored in Notifyer's DB if Meta accepted it.
+  If Meta rejects the payload, the template will not appear in `list-templates.js`.
 - **Templates require Meta approval** — every template submitted via `create-template.js`
-  starts as `"pending"`. Meta typically approves within 60 seconds. A `"rejected"` template
-  cannot be edited; create a new template with a revised name and body instead.
+  starts as `"PENDING"` (uppercase, as Xano stores it). Meta typically approves within
+  60 seconds. A `"rejected"` template cannot be edited; create a new one with a different
+  name and revised content.
 - **Template names are permanent** — once submitted to Meta, the name cannot be changed.
   Use snake_case (lowercase, underscores, no leading digit), e.g. `order_confirmation`.
 - **Body variables need example values** — `--variables '{"1":"John","2":"12345"}'` is
