@@ -1,0 +1,36 @@
+{
+  "_comment": "Example payloads for create-template.js — three common template types",
+
+  "text_with_variables": {
+    "_description": "node scripts/create-template.js --name order_confirmation --category MARKETING --body 'Hello {{1}}, your order #{{2}} has shipped.' --variables '{\"1\":\"John\",\"2\":\"12345\"}'",
+    "name": "order_confirmation",
+    "category": "MARKETING",
+    "language": "en",
+    "body": "Hello {{1}}, your order #{{2}} has shipped.",
+    "variables": { "1": "John", "2": "12345" }
+  },
+
+  "image_with_body_and_buttons": {
+    "_description": "node scripts/create-template.js --name promo_banner --category MARKETING --body 'Check out our sale, {{1}}!' --variables '{\"1\":\"Jane\"}' --type image --media-url 'https://example.com/banner.jpg' --buttons '[{\"type\":\"Quick Reply\",\"text\":\"Shop Now\"},{\"type\":\"Quick Reply\",\"text\":\"No Thanks\"}]'",
+    "name": "promo_banner",
+    "category": "MARKETING",
+    "language": "en",
+    "type": "image",
+    "body": "Check out our sale, {{1}}!",
+    "variables": { "1": "Jane" },
+    "media_url": "https://example.com/banner.jpg",
+    "buttons": [
+      { "type": "Quick Reply", "text": "Shop Now" },
+      { "type": "Quick Reply", "text": "No Thanks" }
+    ],
+    "_note": "media_url is auto-uploaded by the script — pass a publicly accessible URL"
+  },
+
+  "authentication": {
+    "_description": "node scripts/create-template.js --name verify_otp --category AUTHENTICATION --expiry 10",
+    "name": "verify_otp",
+    "category": "AUTHENTICATION",
+    "expiry": 10,
+    "_note": "Do NOT pass --body for AUTHENTICATION templates. Xano auto-generates: 'Your verification code is {{1}}. Do not share this code. (Expires in 10 minutes.)'"
+  }
+}

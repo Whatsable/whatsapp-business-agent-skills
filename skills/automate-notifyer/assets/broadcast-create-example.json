@@ -1,0 +1,60 @@
+{
+  "_comment": "Example for create-broadcast.js — the 3-step broadcast flow",
+  "_note": "create-broadcast.js orchestrates all 3 steps. Use this as a reference for the flags it accepts.",
+
+  "smart_delivery": {
+    "_description": "Batched broadcast with auto-pacing based on read rate",
+    "cli": "node scripts/create-broadcast.js --name 'January Sale' --template-id 42 --test-phone '+14155550123' --recipients ./assets/recipients-example.csv --schedule '25/01/2025 14:00' --delivery-mode smart --delivery-size 4 --read-rate 95",
+    "flags": {
+      "--name": "January Sale",
+      "--template-id": 42,
+      "--test-phone": "+14155550123",
+      "--recipients": "./assets/recipients-example.csv",
+      "--schedule": "25/01/2025 14:00",
+      "--delivery-mode": "smart",
+      "--delivery-size": 4,
+      "--read-rate": 95
+    }
+  },
+
+  "regular_delivery_with_variables": {
+    "_description": "Fixed-batch broadcast with per-recipient body variables in the CSV",
+    "cli": "node scripts/create-broadcast.js --name 'Order Update' --template-id 42 --test-phone '+14155550123' --recipients ./recipients.csv --schedule '26/01/2025 09:00' --delivery-mode regular --delivery-size 10",
+    "_note": "body1, body2, body3 columns in the CSV map to {{1}}, {{2}}, {{3}} in the template body per recipient"
+  },
+
+  "success_response_shape": {
+    "broadcast_identifier": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "test": {
+      "success": true,
+      "broadcast_name": "January Sale",
+      "template_id": 42
+    },
+    "recipients": {
+      "unique_numbers": 3,
+      "cost_of_broadcast": 0.045
+    },
+    "schedule": {
+      "broadcast_name": "January Sale",
+      "scheduled_at": "25/01/2025 14:00",
+      "delivery_mode": "smart",
+      "delivery_size": 4,
+      "read_rate": 95
+    }
+  },
+
+  "delivery_modes": {
+    "smart": "Adaptive batching — waits for read_rate % of a batch to be read before sending the next. Safest for large lists.",
+    "regular": "Fixed-size batches at a constant pace. Predictable but no read-rate feedback loop.",
+    "risk": "No batching — all messages sent at once. Only for very small urgent lists. Can trigger Meta spam detection."
+  },
+
+  "csv_rules": [
+    "phone_number column must NOT include + prefix — use 14155550101, not +14155550101",
+    "Variable columns (body1, body2, body3) map to {{1}}, {{2}}, {{3}} in the template",
+    "media column: public URL for per-recipient media (image/document/video templates)",
+    "button_dynamic_url_value column: per-recipient URL suffix for CTA buttons",
+    "Xano deduplicates phone numbers — duplicates in CSV are silently dropped",
+    "Re-uploading CSV to same broadcast_identifier deletes the previous recipient list first"
+  ]
+}

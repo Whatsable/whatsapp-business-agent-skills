@@ -402,10 +402,17 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 - `references/bots-reference.md` — AI Bot data model, all CRUD endpoints, OpenAI integration, file upload, set-as-default, plan requirements, bot-assignment in chat
 - `references/broadcasts-reference.md` — Full 3-step broadcast workflow, all `/api:6_ZYypAc` endpoints, data model, delivery modes, CSV format, timezone handling, download endpoint
 
+## Assets
+
+- `assets/recipients-example.csv` — Example recipient CSV for `create-broadcast.js` showing all column names and phone number format (no `+` prefix)
+- `assets/template-create-example.json` — Example payloads for `create-template.js` — text with variables, image with buttons, and AUTHENTICATION type
+- `assets/broadcast-create-example.json` — CLI flag reference and success response shape for `create-broadcast.js`, plus delivery mode and CSV rules
+
 <!-- FILEMAP:BEGIN -->
 ```text
 [automate-notifyer file map]|root: .
 |.:{package.json,SKILL.md}
+|assets:{broadcast-create-example.json,recipients-example.csv,template-create-example.json}
 |references:{bots-reference.md,broadcasts-reference.md,templates-reference.md}
 |scripts:{create-bot.js,create-broadcast.js,create-template.js,get-bot.js,get-broadcast.js,get-template.js,list-bots.js,list-broadcasts.js,list-templates.js}
 |scripts/lib:{args.js,notifyer-api.js,result.js}
