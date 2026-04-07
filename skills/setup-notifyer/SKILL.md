@@ -3,14 +3,15 @@ name: setup-notifyer
 description: >
   Create and manage a Notifyer by WhatsAble account — signup, login, retrieve the
   authenticated user, check WhatsApp connection status, manage subscription plans,
-  manage team members, assign roles, configure workspace labels, and manage WhatsApp
-  message templates. Use this skill any time you need to authenticate against the
-  Notifyer Console API, set up a new workspace, or prepare templates for broadcasts.
+  manage team members, assign roles, configure workspace labels, manage WhatsApp
+  message templates, and create and manage AI bots. Use this skill any time you need
+  to authenticate against the Notifyer Console API, set up a new workspace, prepare
+  templates for broadcasts, or configure AI bots for automated chat handling.
 license: Proprietary — © WhatsAble. All rights reserved.
 compatibility: Requires Node.js >= 18. Set NOTIFYER_API_BASE_URL and NOTIFYER_API_TOKEN environment variables before running any script.
 metadata:
   author: whatsable
-  version: "0.2.0"
+  version: "0.3.0"
   product: Notifyer by WhatsAble
   api-base: https://api.insightssystem.com
 ---
@@ -290,6 +291,66 @@ For non-text types (`image`, `document`, `video`), pass a public media URL via
 `--media-url`. The script auto-uploads it to get a handle before submitting.
 Supported formats: PNG/JPG (image), MP4 (video), PDF (document).
 
+### List AI bots
+
+```bash
+node scripts/list-bots.js                    # all bots
+node scripts/list-bots.js --default-only     # only the workspace default bot
+node scripts/list-bots.js --pretty           # human-readable table to stderr
+```
+
+Returns `{ bots: AiBot[], count: n }`.
+Bots are sorted: default bot first, then newest first.
+Each bot has `id`, `bot_name`, `mission`, `tone`, `delay`, `default`, `notification`,
+`human_trigger_keywords`, `handoff_instruction`, `knowledge_base`, `system_prompt`,
+`openai_assistant_id`, `files_metadatas`, `file_texts`, `user_id`, `created_at`.
+
+### Get a single AI bot
+
+```bash
+node scripts/get-bot.js --id 12
+node scripts/get-bot.js --id 12 --pretty
+```
+
+Returns the full `bot_config` record for the given ID.
+Returns `{ ok: false, error: "Bot with id 12 not found.", status: 400 }` if the ID
+does not exist (Xano Precondition fires HTTP 400).
+
+### Create an AI bot
+
+```bash
+# Minimal
+node scripts/create-bot.js --name "Support Bot"
+
+# Full configuration
+node scripts/create-bot.js \
+  --name "Support Bot" \
+  --mission "Help users resolve support issues quickly and accurately." \
+  --knowledge-base "Our return policy is 30 days. Shipping takes 3-5 business days." \
+  --system-prompt "You are a friendly support agent. Be concise and helpful." \
+  --tone "Friendly" \
+  --delay 3 \
+  --handoff-instruction "I'll connect you with a human agent now." \
+  --trigger-keywords "agent,human,speak to person" \
+  --notification \
+  --default
+```
+
+Returns the created `bot_config` record on success.
+
+> **Plan requirement:** AI Bots require a Pro or Agency plan. On Basic plan, the
+> OpenAI Assistant creation will fail — verify with `get-user-plan.js` first.
+
+> **OpenAI dependency:** Creating a bot calls `POST https://api.openai.com/v1/assistants`
+> inside Xano. If OpenAI is unavailable or your workspace has no OpenAI key configured,
+> the bot will not be saved. The script detects this and returns `{ ok: false, blocked: true }`.
+
+> **No duplicate name check:** Multiple bots with the same `bot_name` are allowed.
+
+> **File-based knowledge base:** Not supported in this script. Upload files manually via
+> `POST /api:Sc_sezER/ai_config/files` (10 MB limit, multipart), extract text, then include
+> `files_metadatas` and `file_texts` in a direct API call. See `references/bots-reference.md`.
+
 ### Create a new Notifyer account
 
 ```bash
@@ -440,6 +501,34 @@ Returns `{ ok: true, data: { id, name, email, role, phone_number, ... } }`.
   registration. Meta rate-limits this per day. If you see a daily limit error,
   wait 24 hours.
 
+- **AI Bots require Pro or Agency plan** — on Basic plan the workspace has no OpenAI API key
+  configured, so `create-bot.js` will always fail (OpenAI returns non-200). Verify with
+  `get-user-plan.js` before directing a user to create bots.
+- **`create-bot.js` calls OpenAI internally** — Xano's `POST /ai_config` calls
+  `POST https://api.openai.com/v1/assistants` before saving the bot. Both success and failure
+  return HTTP 200. The script detects failure by checking if `response.bot_name` exists
+  (bot saved) or is missing (OpenAI error log returned instead).
+- **No duplicate bot name check** — unlike labels and templates, bots have no precondition
+  for duplicate names. Multiple bots with the same `bot_name` are allowed.
+- **`GET /ai_config` returns a direct array** — the list endpoint returns a plain JSON array
+  (not `{ items: [], count: n }`). `list-bots.js` normalises this into `{ bots, count }`.
+- **`GET /ai_config/:id` fires 400 for missing bots** — Xano uses a Precondition
+  (`var:model != null`) to guard the GET-by-ID endpoint. HTTP 400 means "not found",
+  not a server error. `get-bot.js` maps this to a user-friendly message.
+- **`set-as-default` requires Admin or Super Admin** — `PATCH /ai_config/set-as-default/:id`
+  has an explicit role Precondition. Team Members are blocked (HTTP 400). Use an Admin token.
+- **`set-as-default` is mutually exclusive** — Xano loops ALL bots and sets every bot's
+  `default` flag: `true` for the target, `false` for all others. Only one bot can be default.
+- **PATCH (update) also calls OpenAI** — `PATCH /ai_config/:id` re-syncs with OpenAI
+  (`PATCH /v1/assistants/:id`). If OpenAI returns non-200, the update fails with HTTP 400
+  (Precondition). The PATCH response is the OpenAI API response, not the updated bot record.
+- **File upload is a public endpoint** — `POST /ai_config/files` has no Xano auth gate
+  (Public Endpoint), but the frontend still sends `Bearer` token. Maximum file size is
+  exactly 10,000,000 bytes (10 MB). Response is the Xano attachment metadata object.
+- **Bot assignment happens via recipient update** — to assign a bot to a WhatsApp conversation
+  in chat, update the recipient record: `PATCH /recipient/:id` with `{ ai_bot_id: <bot_id> }`.
+  The chat app fetches bots using **chat auth** (raw token, no Bearer prefix).
+
 ## API group IDs
 
 Notifyer's backend uses Xano-style API group IDs in the URL path:
@@ -485,6 +574,9 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 | `scripts/list-templates.js` | `GET /api:AFRA_QCy/templates_web` — list all workspace templates with optional status/category/type filters |
 | `scripts/get-template.js` | fetch-then-filter — retrieve a single template by name, template_id, or whatsapp_template_id |
 | `scripts/create-template.js` | `POST /api:AFRA_QCy/create` — submit a template for Meta approval (handles media pre-upload internally) |
+| `scripts/list-bots.js` | `GET /api:Sc_sezER/ai_config` — list all AI bots in the workspace |
+| `scripts/get-bot.js` | `GET /api:Sc_sezER/ai_config/:id` — retrieve a single AI bot by numeric ID |
+| `scripts/create-bot.js` | `POST /api:Sc_sezER/ai_config` — create an AI bot (internally creates an OpenAI Assistant) |
 <!-- FILE MAP END -->
 
 ## References
@@ -496,6 +588,7 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 - `references/labels-reference.md` — Label data model, all CRUD endpoints, keyword auto-assignment behaviour, role-filtering rules
 - `references/api-key-reference.md` — Developer API key retrieval, all three auth modes, and `send_template_message_by_api` reference for Make/Zapier/n8n
 - `references/templates-reference.md` — Template data model, all endpoints, name rules, categories, media upload, button shapes, status lifecycle, body variables
+- `references/bots-reference.md` — AI Bot data model, all CRUD endpoints, OpenAI integration, file upload, set-as-default, plan requirements, bot-assignment in chat
 
 ## Assets
 
@@ -508,8 +601,8 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 [setup-notifyer file map]|root: .
 |.:{package.json,SKILL.md}
 |assets:{connection-status-example.json,signup-example.json,user-plan-example.json}
-|references:{account-reference.md,api-key-reference.md,labels-reference.md,plans-reference.md,team-reference.md,templates-reference.md,whatsapp-connection-reference.md}
-|scripts:{create-account.js,create-label.js,create-template.js,delete-label.js,get-api-key.js,get-connection-status.js,get-me.js,get-template.js,get-user-plan.js,invite-member.js,list-labels.js,list-members.js,list-plans.js,list-templates.js,login.js,refresh-connection.js,remove-member.js,update-label-keywords.js,update-member.js}
+|references:{account-reference.md,api-key-reference.md,bots-reference.md,labels-reference.md,plans-reference.md,team-reference.md,templates-reference.md,whatsapp-connection-reference.md}
+|scripts:{create-account.js,create-bot.js,create-label.js,create-template.js,delete-label.js,get-api-key.js,get-bot.js,get-connection-status.js,get-me.js,get-template.js,get-user-plan.js,invite-member.js,list-bots.js,list-labels.js,list-members.js,list-plans.js,list-templates.js,login.js,refresh-connection.js,remove-member.js,update-label-keywords.js,update-member.js}
 |scripts/lib:{args.js,notifyer-api.js,result.js}
 ```
 <!-- FILEMAP:END -->
