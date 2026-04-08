@@ -3,14 +3,16 @@ name: automate-notifyer
 description: >
   Build automation infrastructure on a Notifyer by WhatsAble account — manage WhatsApp
   message templates, create and configure AI bots for automated chat handling, create
-  and schedule bulk WhatsApp broadcast campaigns, and retrieve messaging analytics and
-  message delivery logs. Use this skill after setup-notifyer has been completed (account
-  authenticated, WhatsApp number connected). Requires NOTIFYER_API_TOKEN from login.js.
+  and schedule bulk WhatsApp broadcast campaigns, retrieve messaging analytics and
+  message delivery logs, and manage developer webhooks (n8n / Make / Zapier integrations)
+  and IO webhooks (bidirectional incoming & outgoing). Use this skill after setup-notifyer
+  has been completed (account authenticated, WhatsApp number connected).
+  Requires NOTIFYER_API_TOKEN from login.js.
 license: Proprietary — © WhatsAble. All rights reserved.
 compatibility: Requires Node.js >= 18. Set NOTIFYER_API_BASE_URL and NOTIFYER_API_TOKEN environment variables before running any script.
 metadata:
   author: whatsable
-  version: "0.2.0"
+  version: "0.3.0"
   product: Notifyer by WhatsAble
   api-base: https://api.insightssystem.com
   depends-on: setup-notifyer
@@ -18,8 +20,8 @@ metadata:
 
 # automate-notifyer
 
-Scripts for building automation infrastructure — templates, AI bots, and broadcasts —
-on a Notifyer account via the Console API (`https://api.insightssystem.com`).
+Scripts for building automation infrastructure — templates, AI bots, broadcasts,
+analytics, and webhooks — on a Notifyer account via the Console API (`https://api.insightssystem.com`).
 All Console API requests authenticate with `Authorization: Bearer <token>`.
 
 > **Prerequisite:** Run `setup-notifyer` first. You need an authenticated session
@@ -295,6 +297,75 @@ Returns `{ logs: LogEntry[], count, total, page, per_page, filter, phone }`.
 Each log has `body`, `phone_number`, `created_at` (Unix ms), `status` (`"sent"` | `"delivered"` | `"read"`).
 Xano returns all matching records — pagination is handled client-side by this script.
 
+### List webhooks
+
+```bash
+node scripts/list-webhooks.js                    # dev webhooks (default)
+node scripts/list-webhooks.js --type io          # IO (incoming & outgoing) webhooks
+node scripts/list-webhooks.js --pretty           # human-readable table to stderr
+node scripts/list-webhooks.js --type io --pretty
+```
+
+Returns `{ type, webhooks: Webhook[], count }`.
+
+**Dev webhook fields:** `id` (int), `webhooks` (URL), `status`, `outgoing`, `incoming`,
+`schedule_activity`, `waiting_duration` (secs), `signature_secret`, `created_at`.
+
+**IO webhook fields:** `id` (text), `webhooks` (URL), `is_active`, `created_at`.
+
+### Create a webhook
+
+```bash
+# Dev webhook — trigger n8n/Make/Zapier on messages
+node scripts/create-webhook.js --url "https://hook.eu2.make.com/abc123"
+node scripts/create-webhook.js --url "https://..." --no-outgoing       # incoming only
+node scripts/create-webhook.js --url "https://..." --no-incoming       # outgoing only
+node scripts/create-webhook.js --url "https://..." --schedule-activity --waiting-duration 3600
+node scripts/create-webhook.js --url "https://..." --signature         # generate HMAC secret key
+
+# IO webhook — bidirectional
+node scripts/create-webhook.js --type io --url "https://myapp.com/webhook"
+node scripts/create-webhook.js --type io --url "https://myapp.com/webhook" --signature
+```
+
+Returns the created webhook record. When `--signature` is passed, the response includes
+`signature_secret` — **save it immediately**. There is no endpoint to retrieve it later.
+
+Dev webhooks default to `outgoing: true`, `incoming: true`. Use `--no-outgoing` or
+`--no-incoming` to disable each trigger direction independently.
+
+### Update a webhook
+
+```bash
+# Dev webhook updates:
+node scripts/update-webhook.js --id 5 --url "https://new-endpoint.com/wh"
+node scripts/update-webhook.js --id 5 --status false               # pause
+node scripts/update-webhook.js --id 5 --no-outgoing --no-incoming  # disable all triggers
+node scripts/update-webhook.js --id 5 --schedule-activity --waiting-duration 1800
+
+# IO webhook (id is text/string):
+node scripts/update-webhook.js --type io --id "abc123" --status false
+node scripts/update-webhook.js --type io --id "abc123" --url "https://new-url.com"
+```
+
+Performs a fetch-then-patch: loads the current record, applies your overrides, sends PATCH.
+Returns the updated webhook record.
+
+### Delete a webhook
+
+```bash
+node scripts/delete-webhook.js --id 5 --confirm
+node scripts/delete-webhook.js --type io --id "abc123" --confirm
+```
+
+The `--confirm` flag is required. Deletion is permanent and cannot be undone.
+
+**Dev webhook response:** `{ deleted: true, id: 5, type: "dev" }` (Xano returns empty body —
+script synthesizes the response).
+
+**IO webhook response:** `{ success: "true", id: "abc123", type: "io" }` (Xano explicitly
+returns `{ "success": "true" }` — note `success` is a string, not a boolean).
+
 ## Rules
 
 ### Templates
@@ -413,6 +484,50 @@ Xano returns all matching records — pagination is handled client-side by this 
   The script fetches upcoming, previous, and ongoing in sequence and returns the first
   match. Use `--status` to restrict to a single group for faster lookups.
 
+### Webhooks
+
+- **Two distinct webhook systems** — "Dev webhooks" (`zapier_make_webhooks` table) are for
+  outbound automation triggers to n8n, Make, or Zapier. "IO webhooks"
+  (`webhook_incoming_and_outgoing` table) are for bidirectional real-time data pipelines.
+  They have different fields, data types, and CORS rules.
+- **Dev webhook endpoints ALL require `Origin: https://console.notifyer-systems.com`** —
+  Xano runs `/cors_origin_console` as step 1 on every `/webhook/dev/*` endpoint. Scripts
+  send this header automatically.
+- **IO webhook endpoints do NOT require a CORS header** — none of the `/user/io/webhook`
+  endpoints run `/cors_origin_console`. Do not add Origin header to IO webhook calls.
+- **Dev webhook id is integer; IO webhook id is TEXT** — never cast an IO webhook id to
+  an integer. Store and pass it as a string. The `update-webhook.js` and `delete-webhook.js`
+  scripts handle this automatically based on `--type`.
+- **Duplicate URL check (dev only)** — `create-webhook.js --type dev` will return
+  `{ ok: false, blocked: true }` if a dev webhook with the same URL already exists
+  (Xano Precondition: `same_exist == false`, HTTP 400).
+- **`DELETE /webhook/dev/:id` is a PUBLIC ENDPOINT** — Xano marks this endpoint as Public,
+  with only a CORS check and no `/get_user` call. This means Xano does NOT verify user
+  identity for dev webhook deletion. Scripts send Bearer token as best practice, but
+  server-side user validation is absent. Only delete from trusted environments.
+- **IO DELETE is fully authenticated** — unlike dev webhook delete, IO webhook delete
+  (`DELETE /user/io/webhook`) does run `/get_user`. It is safe.
+- **HMAC signature secret is shown only once** — when `--signature` is passed, Xano's
+  "Create Secret Key" generates an HMAC secret and stores it in `signature_secret`. The
+  value is returned in the create response. There is no GET endpoint that exposes it again.
+  Store it securely immediately.
+- **`IO DELETE` returns a string `"true"` not boolean** — Xano's Return step explicitly
+  encodes `{ "success": "true" }`. Do not compare `=== true`; compare `=== "true"` or
+  check truthiness with `!!response.success`.
+- **IO PATCH `webhook` field is singular** — the PATCH body for IO webhooks uses `webhook`
+  (singular) while the GET response field is named `webhooks` (plural). The `update-webhook.js`
+  script normalises this automatically.
+- **Feature toggle is separate** — `PATCH /user/incoming_outgoing/feature/status` with
+  `{ is_incomingOutgoing_active: bool }` globally enables/disables the IO webhook feature
+  for the account. Individual IO webhook `status` flags are independent of this global toggle.
+  Both must be true for an IO webhook to receive events.
+- **`waiting_duration` is in seconds (integer)** — used only when `schedule_activity: true`.
+  Pass `--waiting-duration 3600` for a 1-hour wait. Passing it with `schedule_activity: false`
+  is harmless but meaningless.
+- **Update uses fetch-then-patch** — both `update-webhook.js` types call the list endpoint
+  first, find the current record by id, merge your overrides, and send the full object.
+  This is required because Xano's "Add Or Edit Record" function expects a complete record.
+
 ## API group IDs
 
 Notifyer's backend uses Xano-style API group IDs in the URL path:
@@ -425,26 +540,31 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 | Broadcasts | `/api:6_ZYypAc` | Broadcast test, recipient upload, schedule, list, delete, download |
 | Analytics | `/api:5l-RgW1B` | Analytics summary, CSV download, single conversation record |
 | Message Logs | `/api:ereqLKj6` | Message log listing (requires CORS origin header) |
+| Developer/IO Webhooks | `/api:qh9OQ3OW` | Dev webhooks (Make/n8n/Zapier), IO webhooks, feature toggle, manual phone registration |
 
 ## Scripts
 
 <!-- FILE MAP START -->
 | File | Description |
-|------|-------------|
-| `scripts/lib/notifyer-api.js` | Base HTTP client — loads config, sends requests, handles errors |
-| `scripts/lib/args.js` | CLI argument parser (flags, booleans, numbers) |
-| `scripts/lib/result.js` | Standard output helpers — `ok()`, `err()`, `printJson()` |
-| `scripts/list-templates.js` | `GET /api:AFRA_QCy/templates_web` — list all workspace templates with optional status/category/type filters |
-| `scripts/get-template.js` | fetch-then-filter — retrieve a single template by name, template_id, or whatsapp_template_id |
-| `scripts/create-template.js` | `POST /api:AFRA_QCy/create` — submit a template for Meta approval (handles media pre-upload internally) |
-| `scripts/list-bots.js` | `GET /api:Sc_sezER/ai_config` — list all AI bots in the workspace |
-| `scripts/get-bot.js` | `GET /api:Sc_sezER/ai_config/:id` — retrieve a single AI bot by numeric ID |
-| `scripts/create-bot.js` | `POST /api:Sc_sezER/ai_config` — create an AI bot (internally creates an OpenAI Assistant) |
-| `scripts/list-broadcasts.js` | `GET /api:6_ZYypAc/broadcast?require=…` — list broadcasts by status: upcoming, previous, or ongoing |
-| `scripts/get-broadcast.js` | fetch-then-filter — retrieve a single broadcast by id, name, or broadcast_identifier |
-| `scripts/create-broadcast.js` | 3-step flow: broadcast_test → upload CSV → broadcast_schedule — create and schedule a broadcast |
-| `scripts/get-message-analytics.js` | `GET /api:5l-RgW1B/anslytics` — analytics summary (total sent, delivered, read, rates) for a date range |
-| `scripts/get-message-logs.js` | `GET /api:ereqLKj6/log` — message logs with optional phone and type filter; client-side pagination |
+||------|-------------|
+|| `scripts/lib/notifyer-api.js` | Base HTTP client — loads config, sends requests, handles errors |
+|| `scripts/lib/args.js` | CLI argument parser (flags, booleans, numbers) |
+|| `scripts/lib/result.js` | Standard output helpers — `ok()`, `err()`, `printJson()` |
+|| `scripts/list-templates.js` | `GET /api:AFRA_QCy/templates_web` — list all workspace templates with optional status/category/type filters |
+|| `scripts/get-template.js` | fetch-then-filter — retrieve a single template by name, template_id, or whatsapp_template_id |
+|| `scripts/create-template.js` | `POST /api:AFRA_QCy/create` — submit a template for Meta approval (handles media pre-upload internally) |
+|| `scripts/list-bots.js` | `GET /api:Sc_sezER/ai_config` — list all AI bots in the workspace |
+|| `scripts/get-bot.js` | `GET /api:Sc_sezER/ai_config/:id` — retrieve a single AI bot by numeric ID |
+|| `scripts/create-bot.js` | `POST /api:Sc_sezER/ai_config` — create an AI bot (internally creates an OpenAI Assistant) |
+|| `scripts/list-broadcasts.js` | `GET /api:6_ZYypAc/broadcast?require=…` — list broadcasts by status: upcoming, previous, or ongoing |
+|| `scripts/get-broadcast.js` | fetch-then-filter — retrieve a single broadcast by id, name, or broadcast_identifier |
+|| `scripts/create-broadcast.js` | 3-step flow: broadcast_test → upload CSV → broadcast_schedule — create and schedule a broadcast |
+|| `scripts/get-message-analytics.js` | `GET /api:5l-RgW1B/anslytics` — analytics summary (total sent, delivered, read, rates) for a date range |
+|| `scripts/get-message-logs.js` | `GET /api:ereqLKj6/log` — message logs with optional phone and type filter; client-side pagination |
+|| `scripts/list-webhooks.js` | `GET /api:qh9OQ3OW/webhook/dev` or `/user/io/webhook` — list dev or IO webhooks (--type dev|io) |
+|| `scripts/create-webhook.js` | `POST /webhook/dev/create` or `/user/io/webhook` — create a webhook with triggers, signature key, and status |
+|| `scripts/update-webhook.js` | `PATCH /webhook/dev/:id` or `/user/io/webhook` — fetch-then-patch update for URL, status, triggers |
+|| `scripts/delete-webhook.js` | `DELETE /webhook/dev/:id` or `/user/io/webhook` — permanent delete with --confirm safety gate |
 <!-- FILE MAP END -->
 
 ## References
@@ -453,6 +573,7 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 - `references/bots-reference.md` — AI Bot data model, all CRUD endpoints, OpenAI integration, file upload, set-as-default, plan requirements, bot-assignment in chat
 - `references/broadcasts-reference.md` — Full 3-step broadcast workflow, all `/api:6_ZYypAc` endpoints, data model, delivery modes, CSV format, timezone handling, download endpoint
 - `references/analytics-reference.md` — Analytics summary and log API endpoints, response shapes, date range conventions, download CSV usage, limitations
+- `references/webhooks-reference.md` — Dev webhook and IO webhook full API reference: all endpoints, data types, CORS rules, id type differences, HMAC signature keys, feature toggle, manual phone registration
 
 ## Assets
 
@@ -463,10 +584,10 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 <!-- FILEMAP:BEGIN -->
 ```text
 [automate-notifyer file map]|root: .
-|.:{package.json,SKILL.md}
-|assets:{broadcast-create-example.json,recipients-example.csv,template-create-example.json}
-|references:{analytics-reference.md,bots-reference.md,broadcasts-reference.md,templates-reference.md}
-|scripts:{create-bot.js,create-broadcast.js,create-template.js,get-bot.js,get-broadcast.js,get-message-analytics.js,get-message-logs.js,get-template.js,list-bots.js,list-broadcasts.js,list-templates.js}
-|scripts/lib:{args.js,notifyer-api.js,result.js}
+||.:{package.json,SKILL.md}
+||assets:{broadcast-create-example.json,recipients-example.csv,template-create-example.json}
+||references:{analytics-reference.md,bots-reference.md,broadcasts-reference.md,templates-reference.md,webhooks-reference.md}
+||scripts:{create-bot.js,create-broadcast.js,create-template.js,create-webhook.js,delete-webhook.js,get-bot.js,get-broadcast.js,get-message-analytics.js,get-message-logs.js,get-template.js,list-bots.js,list-broadcasts.js,list-templates.js,list-webhooks.js,update-webhook.js}
+||scripts/lib:{args.js,notifyer-api.js,result.js}
 ```
 <!-- FILEMAP:END -->
