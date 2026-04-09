@@ -2,16 +2,18 @@
 /**
  * set-handoff.js — Control AI bot vs. human agent for a recipient's conversation.
  *
- * PATCH /api:bVXsw_FD/chatapp/recipient/handoff
+ * Strategy (fetch-then-merge PATCH):
+ *   1. GET /auth/me → user_id (uuid)
+ *   2. GET /chatapp/recipient?phone_number=&user_id= → recipient row + id
+ *   3. PATCH /web/recipient/:id with merged identity fields + is_ai_assistant
+ *
+ * The legacy PATCH /chatapp/recipient/handoff endpoint expects a boolean `handoff`
+ * (not the strings "human"|"bot") and can be inconsistent; merging into
+ * /web/recipient/:id avoids wiping phone/name when toggling AI mode.
  *
  * Handoff types in Notifyer:
  *   "bot"   → AI bot handles the conversation (is_ai_assistant = true)
  *   "human" → Human agent handles the conversation (is_ai_assistant = false)
- *
- * This script is the primary mechanism for "Chat Handoff" (Phase 3d).
- * Agents use this to:
- *   - Take over a conversation from the bot: --mode human
- *   - Return the conversation to the bot: --mode bot
  *
  * Usage:
  *   node scripts/set-handoff.js --phone 14155550123 --mode human
@@ -25,33 +27,22 @@
  * Optional Flags:
  *   --pretty            Print handoff summary to stderr.
  *
- * Strategy:
- *   1. GET /auth/me → get user_id (uuid) — required by the Xano endpoint
- *   2. PATCH /chatapp/recipient/handoff → set handoff mode
- *
  * Output (success):
- *   { "ok": true, "data": { "id": 42, "is_ai_assistant": false, ... } }
- *
- * Xano request body:
- *   { phone_number: <int>, user_id: <uuid_string>, handoff: <"bot"|"human"> }
- *
- * Note: This endpoint does NOT require CORS header (no cors_origin_web_chat step).
- *   It IS a public endpoint in Xano but still sends Authorization for consistency.
- *
- * Side effects (confirmed from Xano screenshots):
- *   - Updates recipient.is_ai_assistant field
- *   - May trigger webhook event if outgoing webhooks configured
+ *   { "ok": true, "data": { ...recipient from PATCH... } }
  *
  * Auth: Authorization: <token> (raw JWT, no Bearer — chat auth mode).
  *
  * Environment:
  *   NOTIFYER_API_BASE_URL    required
  *   NOTIFYER_API_TOKEN       required (from setup-notifyer/login.js)
+ *   NOTIFYER_CHAT_ORIGIN     optional (default: https://chat.notifyer-systems.com)
  */
 
 import { loadConfig, requestJson, AUTH_MODE_CHAT } from "./lib/notifyer-api.js";
 import { parseArgs, getFlag, getBooleanFlag } from "./lib/args.js";
 import { ok, err, printJson } from "./lib/result.js";
+
+const CHAT_ORIGIN = process.env.NOTIFYER_CHAT_ORIGIN ?? "https://chat.notifyer-systems.com";
 
 async function getUserId(config) {
   const result = await requestJson(config, {
@@ -91,18 +82,47 @@ async function main() {
     return;
   }
 
+  const getResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/chatapp/recipient?phone_number=${phone}&user_id=${userId}`,
+  });
+
+  if (!getResult.ok) {
+    printJson(err(getResult.error, getResult.data, false, getResult.status));
+    return;
+  }
+
+  const raw = Array.isArray(getResult.data) ? getResult.data[0] : getResult.data;
+  if (!raw || (Array.isArray(getResult.data) && getResult.data.length === 0)) {
+    printJson(err(`Recipient with phone ${phone} not found.`, null, false));
+    return;
+  }
+
+  const wantBot = mode === "bot";
+  const patchBody = {
+    name: raw.name ?? "",
+    phone_number: raw.phone_number,
+    phone_number_string: raw.phone_number_string ?? String(raw.phone_number ?? phone),
+    note: raw.note ?? "",
+    global_label: Array.isArray(raw.global_label) ? raw.global_label : [],
+    is_ai_assistant: wantBot,
+  };
+
+  if (patchBody.phone_number == null || patchBody.phone_number === "") {
+    printJson(err("Recipient record is missing phone_number; cannot patch safely."));
+    return;
+  }
+
   if (pretty) {
     process.stderr.write(`\nSetting conversation handoff for +${phone} → ${mode.toUpperCase()}\n`);
+    process.stderr.write(`  (is_ai_assistant → ${wantBot})\n`);
   }
 
   const result = await requestJson(config, {
     method: "PATCH",
-    path: "/api:bVXsw_FD/chatapp/recipient/handoff",
-    body: {
-      phone_number: phone,
-      user_id: userId,
-      handoff: mode,
-    },
+    path: `/api:bVXsw_FD/web/recipient/${raw.id}`,
+    body: patchBody,
+    extraHeaders: { Origin: CHAT_ORIGIN },
   });
 
   if (!result.ok) {
@@ -114,10 +134,14 @@ async function main() {
 
   if (pretty) {
     process.stderr.write(`  is_ai_assistant: ${d?.is_ai_assistant ?? "unknown"}\n`);
-    process.stderr.write(`  Mode: ${mode === "bot" ? "AI Bot is handling conversation" : "Human agent is handling conversation"}\n\n`);
+    process.stderr.write(
+      `  Mode: ${wantBot ? "AI Bot is handling conversation" : "Human agent is handling conversation"}\n\n`
+    );
   }
 
   printJson(ok(d));
 }
 
-main().catch((e) => { printJson(err(`Unexpected error: ${e.message}`)); });
+main().catch((e) => {
+  printJson(err(`Unexpected error: ${e.message}`));
+});
