@@ -56,6 +56,7 @@ node scripts/create-template.js \
 node scripts/create-template.js --name promo_banner --category MARKETING \
   --body "Check out our offer!" --type image --media-url "https://example.com/banner.jpg"
 node scripts/create-template.js --name verify_login --category AUTHENTICATION --expiry 10
+node scripts/delete-template.js --id 987654321 --confirm    # whatsapp_template_id from list-templates.js
 ```
 
 Template names: lowercase, underscores only, cannot start with a digit.
@@ -73,6 +74,10 @@ node scripts/create-bot.js --name "Support Bot" \
   --knowledge-base "Return policy: 30 days. Shipping: 3-5 days." \
   --tone "Friendly" --delay 3 \
   --trigger-keywords "agent,human" --notification --default
+node scripts/update-bot.js --id 12 --tone "Professional" --delay 5
+node scripts/update-bot.js --id 12 --knowledge-base "Updated FAQ content."
+node scripts/set-default-bot.js --id 12 --pretty
+node scripts/delete-bot.js --id 12 --confirm --pretty
 ```
 
 > **Plan requirement:** AI Bots require Pro or Agency plan — check with `setup-notifyer/get-user-plan.js`.
@@ -91,6 +96,7 @@ node scripts/create-broadcast.js \
   --recipients ./recipients.csv \
   --schedule "25/01/2025 14:00" \
   --delivery-mode smart --delivery-size 4 --read-rate 95
+node scripts/delete-broadcast.js --id 5 --confirm          # cancel upcoming broadcast
 ```
 
 `create-broadcast.js` runs 3 sequential API steps: test send → upload CSV → schedule.
@@ -263,10 +269,13 @@ See `references/webhooks-reference.md` for full field reference and CORS/auth de
 - **Duplicate URL check (dev only)** — `create-webhook.js --type dev` will return
   `{ ok: false, blocked: true }` if a dev webhook with the same URL already exists
   (Xano Precondition: `same_exist == false`, HTTP 400).
-- **`DELETE /webhook/dev/:id` is a PUBLIC ENDPOINT** — Xano marks this endpoint as Public,
-  with only a CORS check and no `/get_user` call. This means Xano does NOT verify user
-  identity for dev webhook deletion. Scripts send Bearer token as best practice, but
-  server-side user validation is absent. Only delete from trusted environments.
+- **`DELETE /webhook/dev/:id` is a PUBLIC ENDPOINT in Xano** — Xano marks this endpoint
+  as Public with only a CORS check and no `/get_user` call. `delete-webhook.js` mitigates
+  this at the script level: it first calls `GET /webhook/dev` (fully authenticated) to list
+  the account's webhooks, then verifies the requested ID belongs to the authenticated account
+  before allowing the delete. An attacker with only a webhook ID but no valid token cannot
+  use this script to delete a webhook. The raw API endpoint itself remains unauthenticated —
+  this is a Xano backend issue.
 - **IO DELETE is fully authenticated** — unlike dev webhook delete, IO webhook delete
   (`DELETE /user/io/webhook`) does run `/get_user`. It is safe.
 - **HMAC signature secret is shown only once** — when `--signature` is passed, Xano's
@@ -315,12 +324,17 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 || `scripts/list-templates.js` | `GET /api:AFRA_QCy/templates_web` — list all workspace templates with optional status/category/type filters |
 || `scripts/get-template.js` | fetch-then-filter — retrieve a single template by name, template_id, or whatsapp_template_id |
 || `scripts/create-template.js` | `POST /api:AFRA_QCy/create` — submit a template for Meta approval (handles media pre-upload internally) |
+|| `scripts/delete-template.js` | `DELETE /api:AFRA_QCy/templates/delete` — permanently delete a template from Notifyer and Meta (--confirm required) |
 || `scripts/list-bots.js` | `GET /api:Sc_sezER/ai_config` — list all AI bots in the workspace |
 || `scripts/get-bot.js` | `GET /api:Sc_sezER/ai_config/:id` — retrieve a single AI bot by numeric ID |
 || `scripts/create-bot.js` | `POST /api:Sc_sezER/ai_config` — create an AI bot (internally creates an OpenAI Assistant) |
+|| `scripts/update-bot.js` | `PATCH /api:Sc_sezER/ai_config/:id` — update bot fields (name, mission, tone, delay, etc.); re-syncs OpenAI Assistant |
+|| `scripts/delete-bot.js` | `DELETE /api:Sc_sezER/ai_config/:id` — permanently delete a bot and its OpenAI Assistant (--confirm required) |
+|| `scripts/set-default-bot.js` | `PATCH /api:Sc_sezER/ai_config/set-as-default/:id` — set one bot as the workspace default (unsets others) |
 || `scripts/list-broadcasts.js` | `GET /api:6_ZYypAc/broadcast?require=…` — list broadcasts by status: upcoming, previous, or ongoing |
 || `scripts/get-broadcast.js` | fetch-then-filter — retrieve a single broadcast by id, name, or broadcast_identifier |
 || `scripts/create-broadcast.js` | 3-step flow: broadcast_test → upload CSV → broadcast_schedule — create and schedule a broadcast |
+|| `scripts/delete-broadcast.js` | `DELETE /api:6_ZYypAc/broadcast/:id` — cancel/delete a broadcast (--confirm required; messages already sent not recalled) |
 || `scripts/get-message-analytics.js` | `GET /api:5l-RgW1B/anslytics` — analytics summary (total sent, delivered, read, rates) for a date range |
 || `scripts/get-message-logs.js` | `GET /api:ereqLKj6/log` — message logs with optional phone and type filter; client-side pagination |
 || `scripts/list-webhooks.js` | `GET /api:qh9OQ3OW/webhook/dev` or `/user/io/webhook` — list dev or IO webhooks (--type dev|io) |
@@ -346,14 +360,18 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 ## Limitations
 
 - **Template approval by Meta takes 24–72 hours.** `create-template.js` submits the template to Meta. It cannot be used for messaging until status changes from `PENDING` to `APPROVED`. This cannot be expedited via API.
-- **Templates cannot be edited after approval.** If changes are needed, create a new template with a different name. There is no update-template script (Meta does not allow it).
-- **Broadcasts cannot be cancelled or deleted once scheduled.** There is no delete-broadcast endpoint in the Notifyer API.
+- **Templates cannot be edited after approval.** If changes are needed, create a new template with a different name. There is no update-template script (Meta does not allow editing approved templates).
+- **Deleted template names cannot be reused for 30 days.** Meta enforces a 30-day cooldown after deletion. `delete-template.js` requires the numeric `whatsapp_template_id`, not the string `template_id`.
+- **`delete-broadcast.js` cannot recall messages already sent.** It stops future batches but messages dispatched before deletion are delivered. Only use it on upcoming (not yet started) broadcasts.
 - **AI Bot creation requires an OpenAI API key configured in Notifyer settings.** `create-bot.js` will fail if the workspace has no valid OpenAI key. This is set in the Notifyer console, not via script.
 - **Broadcast CSV recipients must use integer phone numbers (no `+` prefix).** The Xano broadcast endpoint rejects formatted phone strings.
 - **Analytics data may have a reporting delay.** `get-message-analytics.js` reflects data as processed by Notifyer's backend — real-time counts may differ slightly.
 - **Message logs (`get-message-logs.js`) only cover automation and broadcast sends.** Chat messages sent manually or via `chat-notifyer` scripts are not in this log. Use `chat-notifyer/get-conversation-log.js` for those.
 - **IO webhook `id` is a text UUID, not an integer.** Unlike dev webhook IDs. All IO webhook scripts handle this correctly — but external tools must treat the ID as a string.
-- **`DELETE /webhook/dev/:id` is a public endpoint (no user auth check).** It relies only on the CORS origin check. Do not expose dev webhook IDs to untrusted parties.
+- **`DELETE /webhook/dev/:id` is a public endpoint in Xano (no server-side user auth check).** `delete-webhook.js` adds an ownership verification step (authenticated `GET /webhook/dev` first) to block use against webhooks not belonging to the authenticated account. The raw API endpoint remains unauthenticated — a Xano-side fix is still recommended.
+- **IO webhook global feature toggle has no dedicated script.** `PATCH /api:qh9OQ3OW/user/incoming_outgoing/feature/status` (`{ is_incomingOutgoing_active: bool }`) globally enables or disables the IO webhook feature for the entire account. If IO webhooks are not firing, verify this flag is enabled in the Notifyer console settings. Both the global toggle AND the individual webhook's `status` flag must be `true` for events to fire.
+- **Broadcast, analytics, and recipients CSV downloads are not covered by these scripts.** `GET /api:6_ZYypAc/download` (broadcast report), `GET /api:5l-RgW1B/download/analytics/details` (analytics export), and `GET /api:bVXsw_FD/recipient_download_csv` all return binary CSV streams (`Content-Type: text/csv`). They cannot be consumed by the JSON-based scripts here — use raw `fetch` with `response.text()` or `response.blob()` directly in a custom workflow.
+- **Pipedrive and Monday CRM integrations are browser-only OAuth flows.** The `/api:MLBAaPmt/pipedrive/...` and `/api:2qGGG8pe/monday/...` API groups require OAuth token exchange via browser redirect. There are no scripts for these integrations in this skill set.
 
 <!-- FILEMAP:BEGIN -->
 ```text
@@ -361,7 +379,7 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 ||.:{package.json,SKILL.md}
 ||assets:{broadcast-create-example.json,recipients-example.csv,template-create-example.json}
 ||references:{analytics-reference.md,bots-reference.md,broadcasts-reference.md,templates-reference.md,webhooks-reference.md}
-||scripts:{create-bot.js,create-broadcast.js,create-template.js,create-webhook.js,delete-webhook.js,get-bot.js,get-broadcast.js,get-message-analytics.js,get-message-logs.js,get-template.js,list-bots.js,list-broadcasts.js,list-templates.js,list-webhooks.js,update-webhook.js}
+||scripts:{create-bot.js,create-broadcast.js,create-template.js,create-webhook.js,delete-bot.js,delete-broadcast.js,delete-template.js,delete-webhook.js,get-bot.js,get-broadcast.js,get-message-analytics.js,get-message-logs.js,get-template.js,list-bots.js,list-broadcasts.js,list-templates.js,list-webhooks.js,set-default-bot.js,update-bot.js,update-webhook.js}
 ||scripts/lib:{args.js,notifyer-api.js,result.js}
 ```
 <!-- FILEMAP:END -->

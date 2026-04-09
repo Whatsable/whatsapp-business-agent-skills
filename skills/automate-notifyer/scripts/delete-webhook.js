@@ -33,10 +33,13 @@
  * CRITICAL — Dev Webhook Security:
  *   DELETE /webhook/dev/:id is a PUBLIC ENDPOINT in Xano.
  *   Xano only runs /cors_origin_console (CORS check) — there is NO /get_user call.
- *   This means the endpoint does not verify user identity server-side.
- *   The script sends Authorization: Bearer as a best practice, but be aware
- *   that Xano does not enforce it for this endpoint.
- *   Only run this script from trusted environments.
+ *   This script mitigates this at the script level with an ownership check:
+ *     1. GET /webhook/dev (fully authenticated — runs /get_user) to list all
+ *        webhooks belonging to the authenticated account.
+ *     2. Confirm the requested ID appears in that list before deleting.
+ *   This means an attacker with only a webhook ID but no valid token cannot
+ *   use this script to delete a webhook they don't own.
+ *   Note: the raw API endpoint remains public — this is a script-level defence.
  *
  * IO vs Dev difference:
  *   - IO DELETE is fully authenticated (Xano runs /get_user) — standard security.
@@ -93,6 +96,32 @@ async function main() {
     const id = parseInt(idRaw, 10);
     if (isNaN(id)) {
       printJson(err("--id must be an integer for dev webhooks."));
+      return;
+    }
+
+    // Ownership check: GET /webhook/dev is fully authenticated (runs /get_user).
+    // Verify the requested ID belongs to this account before calling DELETE,
+    // which has no server-side user auth check in Xano.
+    const listResult = await requestJson(config, {
+      method: "GET",
+      path: "/api:qh9OQ3OW/webhook/dev",
+      extraHeaders: { Origin: CONSOLE_ORIGIN },
+    });
+
+    if (!listResult.ok) {
+      printJson(err(`Ownership check failed: could not list webhooks. ${listResult.error}`, listResult.data, false, listResult.status));
+      return;
+    }
+
+    const webhooks = Array.isArray(listResult.data) ? listResult.data : (listResult.data?.webhooks ?? []);
+    const owns = webhooks.some((w) => Number(w.id) === id);
+    if (!owns) {
+      printJson(err(
+        `Dev webhook ID ${id} was not found in your account's webhook list. ` +
+        "Deletion blocked — only webhooks belonging to the authenticated account can be deleted.",
+        null,
+        true
+      ));
       return;
     }
 

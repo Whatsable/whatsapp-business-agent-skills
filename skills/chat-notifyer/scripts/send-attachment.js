@@ -3,17 +3,19 @@
  * send-attachment.js — Upload a file and send it as a WhatsApp media message.
  *
  * Step 1: POST /api:ox_LN9zX/upload_file_by_attachment  (multipart/form-data)
- * Step 2: POST /api:bVXsw_FD/web/send/attachment        (JSON)
+ * Step 2: POST /api:bVXsw_FD/web/send/<type>            (JSON)
+ *           where <type> is: image | video | audio | document
  *
- * Both steps use AUTH_MODE_CHAT (raw JWT, no Bearer).
- * Step 1 uses CORS (Origin: https://chat.notifyer-systems.com).
- * Step 2: no extra CORS header needed.
+ * The send endpoint is chosen from the file's MIME type:
+ *   image     .jpg, .jpeg, .png, .gif, .webp   → /web/send/image   (max 5 MB)
+ *   video     .mp4                              → /web/send/video   (max 16 MB)
+ *   audio     .aac, .mp3, .ogg, .amr, .opus    → /web/send/audio   (max 16 MB)
+ *   document  .pdf, .docx, .xlsx, .txt, etc.   → /web/send/document (max 100 MB)
  *
- * Supported Media Types:
- *   image     .jpg, .jpeg, .png, .gif, .webp   (max 5 MB)
- *   video     .mp4                              (max 16 MB)
- *   audio     .aac, .mp3, .ogg, .amr, .opus    (max 16 MB)
- *   document  .pdf, .docx, .xlsx, .txt, etc.   (max 100 MB)
+ * Steps performed by this script:
+ *   1. Fetch the full recipient object (needed for currentRecipient field)
+ *   2. Upload the file to Xano storage
+ *   3. POST to the appropriate /web/send/<type> endpoint
  *
  * Usage:
  *   node scripts/send-attachment.js --phone 14155550123 --file /path/to/invoice.pdf
@@ -31,30 +33,23 @@
  *                       When set, Xano saves to chat_schedule (no immediate send).
  *   --pretty            Print upload and send summary to stderr.
  *
- * Xano Upload Response (Step 1):
- *   { url: "https://...", mime_type: "image/jpeg", ... }
- *
- * Send Payload (Step 2) built by this script from Step 1 response:
+ * Send Payload (Step 3) built by this script:
  *   {
- *     url: <uploaded_url>,
- *     mime_type: <mime>,
- *     phone_number: <int>,
+ *     media_link: <uploaded_url>,     ← URL from upload response
+ *     type: <mime_type>,              ← full MIME type string
  *     caption: <string|"">,
- *     currentRecipient: { phone_number: <int> },
+ *     currentRecipient: { ...full recipient object... },
  *     scheduled_time: <ms|0>
  *   }
- *
- * The script must call get_recipient_by_phone first to build a full
- * currentRecipient object — OR can use minimal {phone_number} if full
- * recipient data is unavailable. The script uses minimal form for simplicity.
  *
  * Side effects on success:
  *   - Logs to chat_log, conversation tables
  *   - Fires /send_outgoing_message_by_webhook if webhooks configured
  *
- * CRITICAL — 24h Window Rule: same as send-text.js.
- *   Attachments can only be sent within 24h of recipient's last message.
+ * CRITICAL — 24h Window Rule:
+ *   Media attachments can only be sent within 24h of recipient's last message.
  *   For outside the window, use send-template.js with a media template.
+ *   Check the window with: node scripts/get-recipient.js --phone <number>
  *
  * Auth: Authorization: <token> (raw JWT, no Bearer — chat auth mode).
  *
@@ -66,7 +61,7 @@
 
 import { readFileSync } from "fs";
 import { basename, extname } from "path";
-import { loadConfig, AUTH_MODE_CHAT } from "./lib/notifyer-api.js";
+import { loadConfig, requestJson, AUTH_MODE_CHAT } from "./lib/notifyer-api.js";
 import { parseArgs, getFlag, getBooleanFlag } from "./lib/args.js";
 import { ok, err, printJson } from "./lib/result.js";
 
@@ -84,6 +79,13 @@ const MIME_MAP = {
   ".txt": "text/plain",
 };
 
+function mimeToEndpoint(mimeType) {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  return "document";
+}
+
 function parseDateDDMMYYYY(str) {
   const match = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/);
   if (!match) return null;
@@ -92,12 +94,26 @@ function parseDateDDMMYYYY(str) {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-async function uploadFile(config, filePath) {
+async function findRecipient(config, phone) {
+  const result = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/web/recipient?page_number=0&per_page=20&search=${encodeURIComponent(String(phone))}&labels=[]&status=`,
+    extraHeaders: { Origin: CHAT_ORIGIN },
+  });
+  if (!result.ok) return result;
+  const items = Array.isArray(result.data) ? result.data : [];
+  const match = items.find((row) => {
+    const r = row.recipient ?? row;
+    return String(r.phone_number) === String(phone) ||
+      String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
+  });
+  if (!match) return { ok: false, error: `Recipient with phone ${phone} not found. They must have messaged you first.` };
+  return { ok: true, data: match.recipient ?? match };
+}
+
+async function uploadFile(filePath, mimeType) {
   const baseUrl = process.env.NOTIFYER_API_BASE_URL?.replace(/\/$/, "");
   const token = process.env.NOTIFYER_API_TOKEN;
-
-  const ext = extname(filePath).toLowerCase();
-  const mimeType = MIME_MAP[ext] ?? "application/octet-stream";
   const fileName = basename(filePath);
   const fileBuffer = readFileSync(filePath);
 
@@ -107,36 +123,30 @@ async function uploadFile(config, filePath) {
 
   const response = await fetch(`${baseUrl}/api:ox_LN9zX/upload_file_by_attachment`, {
     method: "POST",
-    headers: {
-      Authorization: token,
-      Origin: CHAT_ORIGIN,
-    },
+    headers: { Authorization: token, Origin: CHAT_ORIGIN },
     body: formData,
   });
 
-  const contentType = response.headers.get("content-type") ?? "";
   const text = await response.text();
-
-  if (!response.ok) {
-    let errorData;
-    try { errorData = JSON.parse(text); } catch { errorData = text; }
-    return { ok: false, error: `Upload failed (HTTP ${response.status})`, data: errorData };
-  }
-
   let data;
   try { data = JSON.parse(text); } catch { data = text; }
-  return { ok: true, data, mime_type: mimeType };
+
+  if (!response.ok) {
+    return { ok: false, error: `Upload failed (HTTP ${response.status})`, data };
+  }
+  return { ok: true, data };
 }
 
-async function sendAttachment(config, body) {
+async function sendMedia(config, endpointType, body) {
   const baseUrl = process.env.NOTIFYER_API_BASE_URL?.replace(/\/$/, "");
   const token = process.env.NOTIFYER_API_TOKEN;
 
-  const response = await fetch(`${baseUrl}/api:bVXsw_FD/web/send/attachment`, {
+  const response = await fetch(`${baseUrl}/api:bVXsw_FD/web/send/${endpointType}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: token,
+      Origin: CHAT_ORIGIN,
     },
     body: JSON.stringify(body),
   });
@@ -174,8 +184,7 @@ async function main() {
     return;
   }
 
-  let fileBuffer;
-  try { fileBuffer = readFileSync(filePath); } catch {
+  try { readFileSync(filePath); } catch {
     printJson(err(`File not found or unreadable: ${filePath}`));
     return;
   }
@@ -190,35 +199,50 @@ async function main() {
     scheduledTime = ms;
   }
 
+  const ext = extname(filePath).toLowerCase();
+  const mimeType = MIME_MAP[ext];
+  if (!mimeType) {
+    printJson(err(
+      `Unsupported file type: "${ext}". Allowed extensions: ${Object.keys(MIME_MAP).join(", ")}.\n` +
+      "  Only explicitly supported media types can be sent to prevent accidental data exposure."
+    ));
+    return;
+  }
+  const endpointType = mimeToEndpoint(mimeType);
+
   const config = loadConfig({ authMode: AUTH_MODE_CHAT, requireToken: true });
 
-  if (pretty) process.stderr.write(`\nUploading file: ${basename(filePath)}...\n`);
+  if (pretty) process.stderr.write(`\nFetching recipient record for +${phone}...\n`);
+  const recipientResult = await findRecipient(config, String(phone));
+  if (!recipientResult.ok) {
+    printJson(err(recipientResult.error));
+    return;
+  }
+  const currentRecipient = recipientResult.data;
 
-  const uploadResult = await uploadFile(config, filePath);
+  if (pretty) process.stderr.write(`Uploading ${basename(filePath)} (${mimeType})...\n`);
+  const uploadResult = await uploadFile(filePath, mimeType);
   if (!uploadResult.ok) {
     printJson(err(uploadResult.error, uploadResult.data));
     return;
   }
 
-  const uploadedUrl = uploadResult.data?.url ?? uploadResult.data;
-  const mimeType = uploadResult.data?.mime_type ?? uploadResult.mime_type ?? "application/octet-stream";
+  const mediaLink = uploadResult.data?.url ?? uploadResult.data;
 
   if (pretty) {
-    process.stderr.write(`  Uploaded URL: ${uploadedUrl}\n`);
-    process.stderr.write(`  MIME: ${mimeType}\n`);
-    process.stderr.write(`Sending attachment...\n`);
+    process.stderr.write(`  Uploaded URL: ${mediaLink}\n`);
+    process.stderr.write(`  Sending via /web/send/${endpointType}...\n`);
   }
 
   const sendBody = {
-    url: uploadedUrl,
-    mime_type: mimeType,
-    phone_number: phone,
+    media_link: mediaLink,
+    type: mimeType,
     caption,
-    currentRecipient: { phone_number: phone },
+    currentRecipient,
     scheduled_time: scheduledTime,
   };
 
-  const sendResult = await sendAttachment(config, sendBody);
+  const sendResult = await sendMedia(config, endpointType, sendBody);
   if (!sendResult.ok) {
     printJson(err(sendResult.error, sendResult.data));
     return;
@@ -226,23 +250,21 @@ async function main() {
 
   const d = sendResult.data;
   if (d?.success === false) {
-    printJson(err(d.message || "Attachment send failed (API returned success: false)", d, false));
+    printJson(err(d.message || "Media send failed (API returned success: false)", d, false));
     return;
   }
 
   if (pretty) {
-    if (scheduledTime) {
-      process.stderr.write(`\nAttachment scheduled for ${scheduleStr}\n`);
-    } else {
-      process.stderr.write(`\nAttachment sent!\n`);
-    }
+    process.stderr.write(scheduledTime
+      ? `\nMedia scheduled for ${scheduleStr}\n`
+      : `\nMedia sent!\n`);
     process.stderr.write(`  To: +${phone}\n`);
-    process.stderr.write(`  File: ${basename(filePath)}\n`);
+    process.stderr.write(`  File: ${basename(filePath)} (${endpointType})\n`);
     if (caption) process.stderr.write(`  Caption: "${caption}"\n`);
     process.stderr.write("\n");
   }
 
-  printJson(ok({ uploaded_url: uploadedUrl, mime_type: mimeType, send_result: d }));
+  printJson(ok({ media_link: mediaLink, mime_type: mimeType, media_type: endpointType, send_result: d }));
 }
 
 main().catch((e) => { printJson(err(`Unexpected error: ${e.message}`)); });

@@ -8,6 +8,11 @@
  * immediately with the supplied credentials. You must share the email + password
  * with the new member out-of-band (e.g. over WhatsApp, email, or a password manager).
  *
+ * Security Note:
+ *   --password is visible in the OS process list (ps aux / /proc/<pid>/cmdline)
+ *   for the duration the process runs. On shared/monitored systems, prefer
+ *   secret injection over bare CLI flags visible to other processes.
+ *
  * Usage:
  *   node scripts/invite-member.js \
  *     --name "Jane Smith" \

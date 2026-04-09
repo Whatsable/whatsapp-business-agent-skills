@@ -239,17 +239,27 @@ node scripts/list-bots.js --pretty
 node scripts/assign-bot.js --phone 14155550123 --bot-id 5 --pretty
 ```
 
-### Read conversation message history
+### Read the full conversation thread (sent + received)
 
 ```bash
-# Last 20 outbound messages to this contact:
+# Last 30 messages (both sides of the conversation):
+node scripts/get-conversation.js --phone 14155550123 --pretty
+
+# Page through history:
+node scripts/get-conversation.js --phone 14155550123 --page 1 --per-page 50 --pretty
+```
+
+### Read outbound send history (analytics/delivery log)
+
+```bash
+# Last 20 outbound-only messages with delivery status:
 node scripts/get-conversation-log.js --phone 14155550123 --pretty
 
 # All messages ever sent to this contact:
 node scripts/get-conversation-log.js --phone 14155550123 --all --pretty
 ```
 
-**Note:** Only outbound messages (sent by Notifyer) are in this log. Inbound messages from the customer are not captured — view those in chat.notifyer-systems.com.
+**Note:** `get-conversation.js` returns the full bidirectional thread (both sides). `get-conversation-log.js` returns outbound-only sends with delivery analytics (from the console log API).
 
 ### Update a recipient's display name
 
@@ -306,7 +316,7 @@ node scripts/add-note.js --phone 14155550123 --note ""   # clear note
 | `scripts/filter-recipients-by-label.js` | List recipients filtered by label(s) | Chat |
 | `scripts/send-text.js` | Send a free-text message (24h window required) | Chat |
 | `scripts/send-template.js` | Send a template message (no window required) | Chat |
-| `scripts/send-attachment.js` | Upload file then send as media message | Chat |
+| `scripts/send-attachment.js` | Upload file then send as image/video/audio/document (auto-detects type) | Chat |
 | `scripts/assign-label.js` | Assign a label to a recipient | Chat |
 | `scripts/remove-label.js` | Remove a label from a recipient | Chat |
 | `scripts/set-handoff.js` | Toggle AI bot vs. human mode | Chat |
@@ -316,7 +326,8 @@ node scripts/add-note.js --phone 14155550123 --note ""   # clear note
 | `scripts/delete-scheduled.js` | Cancel a scheduled message | Chat |
 | `scripts/add-note.js` | Set or append to manual note on recipient | Chat |
 | `scripts/get-notes.js` | Read manual + AI-generated notes for recipient | Chat |
-| `scripts/get-conversation-log.js` | Read outbound message history for a phone number | Console |
+| `scripts/get-conversation.js` | Read full bidirectional chat thread (sent + received messages) | Chat |
+| `scripts/get-conversation-log.js` | Read outbound-only send history with delivery status (console log API) | Console |
 | `scripts/update-recipient.js` | Update recipient display name | Chat |
 
 ### Shared Library (scripts/lib/)
@@ -351,11 +362,13 @@ node scripts/add-note.js --phone 14155550123 --note ""   # clear note
 ## Limitations
 
 - **WhatsApp connection must exist before any messaging.** If the WhatsApp number is disconnected, all send scripts will fail. Check with `setup-notifyer/get-connection-status.js`. Re-connecting a fully revoked WABA requires the browser-based embedded signup — it cannot be scripted.
-- **Outbound-only message history.** `get-conversation-log.js` shows messages sent by Notifyer. Inbound messages from customers are not available via API — view them in chat.notifyer-systems.com.
-- **No incoming message handling.** Scripts are outbound-only. Incoming messages trigger webhooks (see `automate-notifyer` skill).
+- **`get-conversation.js` reads the full thread; `get-conversation-log.js` is outbound-only.** Use `get-conversation.js` (Chat API, `/web/conversations`) to read both sides of a conversation. Use `get-conversation-log.js` (Console API, `/api:ereqLKj6/log`) for outbound delivery analytics only.
+- **No incoming message handling in scripts.** Incoming messages trigger webhooks (see `automate-notifyer` skill). Scripts cannot subscribe to or poll for new inbound messages.
 - **24h window is enforced by WhatsApp server-side.** Scripts cannot bypass it. When the window is closed, use `send-template.js` — free-text sends will be rejected by Meta.
 - **note_auto is read-only.** AI-generated notes are written by Notifyer's internal AI logic and cannot be set or cleared via API.
 - **No bulk send from chat.** For bulk messaging to multiple recipients at once, use `automate-notifyer/create-broadcast.js`.
 - **Template approval required before use.** Templates must have `APPROVED` status from Meta. Manage template creation and status via `automate-notifyer/create-template.js` and `list-templates.js`.
 - **Team Member token restricts recipient visibility.** Xano server-side filters recipients to the member's assigned label scope. This cannot be overridden from the script.
 - **set-handoff.js and get-recipient.js call `/auth/me` internally.** This adds one extra API round-trip on each invocation. If the token is expired, both the auth/me call and the main call will fail — re-run `setup-notifyer/login.js` to refresh.
+- **Mark-as-read has no script.** `PATCH /api:bVXsw_FD/web/conversations` (`{ phone_number, message_id, status }`) updates message read/delivery status. This is triggered automatically by the chat UI when a conversation is opened — there is no script for it, and AI agents do not need to call it manually.
+- **Recipient CSV download is not covered.** `GET /api:bVXsw_FD/recipient_download_csv` returns a binary CSV stream. Use raw `fetch` with `response.text()` or `response.blob()` in a custom workflow if you need to export the full recipient list.

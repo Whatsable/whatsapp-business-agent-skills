@@ -2,7 +2,7 @@
 /**
  * delete-scheduled.js — Cancel and delete a scheduled message.
  *
- * DELETE /api:bVXsw_FD/web/chat_schedule/:id
+ * DELETE /api:bVXsw_FD/web/scheduled_messages?id=<id>
  *
  * Use this to cancel a scheduled message before it fires.
  * Get the id from: node scripts/list-scheduled.js
@@ -21,15 +21,14 @@
  * Output (success):
  *   { "ok": true, "data": { "deleted": true, "id": 7 } }
  *
- * Note: Xano returns HTTP 200 with an empty body on success (similar to
- *   other DELETE endpoints). Script synthesises a consistent success response.
+ * Note: Xano returns HTTP 200 with an empty body on success.
+ *   Script synthesises a consistent success response.
  *
  * CORS: Xano runs /cors_origin_web_chat on this endpoint.
  *   Script sends Origin: https://chat.notifyer-systems.com.
  *
  * Already-fired messages: If the scheduled message has already been sent,
- *   the DELETE may return 404 or succeed (depends on Xano implementation).
- *   The record may have been cleared from the table after firing.
+ *   the DELETE may return 404. The record is removed from the table after firing.
  *
  * Auth: Authorization: <token> (raw JWT, no Bearer — chat auth mode).
  *
@@ -60,14 +59,15 @@ async function main() {
     return;
   }
 
-  const config = loadConfig({ authMode: AUTH_MODE_CHAT, requireToken: true });
+  loadConfig({ authMode: AUTH_MODE_CHAT, requireToken: true });
 
   const baseUrl = process.env.NOTIFYER_API_BASE_URL?.replace(/\/$/, "");
   const token = process.env.NOTIFYER_API_TOKEN;
 
-  const response = await fetch(`${baseUrl}/api:bVXsw_FD/web/chat_schedule/${id}`, {
+  const response = await fetch(`${baseUrl}/api:bVXsw_FD/web/scheduled_messages?id=${id}`, {
     method: "DELETE",
     headers: {
+      "Content-Type": "application/json",
       Authorization: token,
       Origin: CHAT_ORIGIN,
     },

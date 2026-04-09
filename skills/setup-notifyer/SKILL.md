@@ -396,14 +396,24 @@ Notifyer's backend uses Xano-style API group IDs in the URL path:
 - `assets/connection-status-example.json` — Example connection status response
 - `assets/user-plan-example.json` — Example response from `get-user-plan.js`
 
+## Security Notes
+
+- **`NOTIFYER_API_BASE_URL` must be `https://`.**  All three skills enforce this at startup — any `http://` or non-HTTPS URL is rejected immediately to prevent tokens being sent unencrypted or to a rogue host.
+- **`--password` is visible in the OS process list.** CLI flags are readable via `ps aux` or `/proc/<pid>/cmdline` for the lifetime of the process. On shared or monitored machines, prefer injecting credentials via environment variables or a secrets manager rather than bare CLI flags.
+- **The JWT token from `login.js` is printed to stdout.** This is by design — the agent must capture it to export `NOTIFYER_API_TOKEN`. In orchestrated environments, ensure stdout is not persisted to unprotected logs. Treat the token like a session cookie.
+- **The Developer API key from `get-api-key.js` is printed to both stdout and stderr.** Store it immediately in a secrets manager. It provides direct WhatsApp send access without a session login.
+- **Zero npm dependencies.** All three skills use only Node.js built-ins — there is no supply chain risk from third-party packages.
+
 ## Limitations
 
 - **WhatsApp initial connection requires a browser.** The QR scan / embedded signup flow (WABA onboarding) cannot be scripted. An admin must complete it once via the Notifyer console UI (console.notifyer-systems.com). After that, `get-connection-status.js` and `refresh-connection.js` can manage the connection programmatically.
+- **WhatsApp OTP verification is browser-only.** The `PATCH /api:0hqyGRIz/whatsapp_verification/{userId}` endpoint (OTP submission during phone re-authentication) is triggered by the console UI. There is no script for this flow.
 - **WhatsApp Business Account (WABA) and Meta Business Suite setup must be done manually.** Phone number registration, business verification, and WABA approval are Meta-side processes outside the Notifyer API.
 - **Account creation is irreversible via script.** `create-account.js` creates a full Notifyer workspace. There is no delete-account endpoint.
-- **Password recovery must be done via the Notifyer web UI.** There is no password reset API endpoint.
+- **Password recovery must be done via the Notifyer web UI.** The reset flow (`GET /reset_password?email=` to trigger email + `PATCH /reset_password` to set the new password) requires the user to click a link in the email. There is no agent-accessible reset path that bypasses the email step.
 - **`refresh-connection.js` re-syncs an existing connection.** It cannot re-initiate a fully disconnected or revoked WABA — that requires going through the browser-based embedded signup again.
-- **Plan upgrades/downgrades must be done in the Notifyer console UI.** `list-plans.js` and `get-user-plan.js` are read-only — there is no API to change the active plan.
+- **Plan upgrades, downgrades, and credit purchases are browser-only (Stripe).** `list-plans.js` and `get-user-plan.js` are read-only. Changing plans (`POST /api:Mk_r6mq0/sessions`), accessing the billing portal (`POST /api:Mk_r6mq0/portal`), and buying credits (`POST /api:Mk_r6mq0/add_credits`) are Stripe redirect flows — not scriptable.
+- **Profile picture uploads and onboarding step markers are UI-only.** `PATCH /profile_picture_update`, `PATCH /payment_method_update`, and `PATCH /test_message_update` are completion flags set by the console onboarding UI. There are no scripts for these — they do not affect core messaging functionality once the account is set up.
 - **Super Admin role cannot be assigned via script.** Only Admin and Team Member roles are assignable through `update-member.js`. Super Admin is set by Notifyer at workspace creation.
 
 <!-- FILEMAP:BEGIN -->

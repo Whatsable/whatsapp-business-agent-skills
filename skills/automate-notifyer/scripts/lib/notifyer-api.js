@@ -33,6 +33,14 @@ export function loadConfig(options = {}) {
     );
     process.exit(1);
   }
+  if (!baseUrl.startsWith("https://")) {
+    console.error(
+      "Error: NOTIFYER_API_BASE_URL must start with https://\n" +
+        "  Insecure base URLs are rejected to prevent token leakage.\n" +
+        "  Current value: " + baseUrl
+    );
+    process.exit(1);
+  }
 
   const token = process.env.NOTIFYER_API_TOKEN ?? null;
   if (requireToken && !token) {

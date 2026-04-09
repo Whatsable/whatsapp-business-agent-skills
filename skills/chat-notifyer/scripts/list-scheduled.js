@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 /**
- * list-scheduled.js — List all scheduled messages for this account.
+ * list-scheduled.js — List scheduled messages for a recipient or all conversations.
  *
- * GET /api:bVXsw_FD/web/chat_schedule
+ * GET /api:bVXsw_FD/web/scheduled_messages
  *
  * Scheduled messages are created via send-text.js, send-template.js, or
- * send-attachment.js with the --schedule flag. They are stored in Xano's
- * chat_schedule table and sent automatically at the scheduled_time.
+ * send-attachment.js with the --schedule flag. They are sent automatically
+ * at the scheduled_time by the Xano backend.
  *
  * Usage:
- *   node scripts/list-scheduled.js
  *   node scripts/list-scheduled.js --phone 14155550123
  *   node scripts/list-scheduled.js --pretty
  *
  * Optional Flags:
- *   --phone <number>    Filter by recipient phone number (client-side filter).
+ *   --phone <number>    Filter by recipient phone number (passed to server).
  *   --pretty            Print a human-readable table to stderr.
  *
  * Output (success):
@@ -38,15 +37,16 @@
  *   }
  *
  * Scheduled message fields (normalised):
- *   id                  Integer — use this for delete-scheduled.js
- *   phone_number        Integer
- *   message_type        "text" | "template" | "attachment"
- *   text                Content for text messages (null for template/attachment)
- *   template            Template ID for template messages (null otherwise)
- *   url                 URL for attachment messages (null otherwise)
- *   scheduled_time      Unix ms timestamp (integer)
+ *   id                        Integer — use this for delete-scheduled.js
+ *   phone_number              Integer
+ *   message_type              "text" | "template" | "image" | "video" | "audio" | "document"
+ *   text                      Content for text messages (null for others)
+ *   template                  Template ID for template messages (null otherwise)
+ *   media_link                URL for media messages (null otherwise)
+ *   caption                   Caption for media messages (null otherwise)
+ *   scheduled_time            Unix ms timestamp (integer)
  *   scheduled_time_formatted  ISO 8601 string for readability
- *   status              "pending" | "sent" | "failed"
+ *   status                    "pending" | "sent" | "failed"
  *
  * CORS: Xano runs /cors_origin_web_chat on this endpoint.
  *   Script sends Origin: https://chat.notifyer-systems.com.
@@ -70,11 +70,11 @@ function normalise(item) {
   return {
     id: item.id,
     phone_number: item.phone_number,
-    message_type: item.message_type ?? (item.text ? "text" : item.template ? "template" : "attachment"),
+    message_type: item.message_type ?? (item.text ? "text" : item.template ? "template" : "media"),
     text: item.text ?? null,
     template: item.template ?? null,
     variables: item.variables ?? null,
-    url: item.url ?? null,
+    media_link: item.media_link ?? item.url ?? null,
     caption: item.caption ?? null,
     scheduled_time: scheduledMs,
     scheduled_time_formatted: scheduledMs ? new Date(scheduledMs).toISOString() : null,
@@ -90,9 +90,15 @@ async function main() {
 
   const config = loadConfig({ authMode: AUTH_MODE_CHAT, requireToken: true });
 
+  const query = {};
+  if (phoneRaw) {
+    query.phone_number = parseInt(phoneRaw.replace(/^\+/, ""), 10);
+  }
+
   const result = await requestJson(config, {
     method: "GET",
-    path: "/api:bVXsw_FD/web/chat_schedule",
+    path: "/api:bVXsw_FD/web/scheduled_messages",
+    query,
     extraHeaders: { Origin: CHAT_ORIGIN },
   });
 
@@ -101,20 +107,14 @@ async function main() {
     return;
   }
 
-  let items = Array.isArray(result.data) ? result.data : (result.data?.items ?? []);
-
-  if (phoneRaw) {
-    const phone = phoneRaw.replace(/^\+/, "");
-    items = items.filter((item) => String(item.phone_number) === phone);
-  }
-
+  const items = Array.isArray(result.data) ? result.data : (result.data?.items ?? result.data?.scheduled ?? []);
   const normalised = items.map(normalise);
 
   if (pretty) {
     process.stderr.write(`\nScheduled Messages (${normalised.length})\n`);
     process.stderr.write(`${"─".repeat(90)}\n`);
     for (const msg of normalised) {
-      const preview = msg.text?.slice(0, 40) ?? msg.template ?? msg.url?.slice(0, 40) ?? "(no preview)";
+      const preview = msg.text?.slice(0, 40) ?? msg.template ?? msg.media_link?.slice(0, 40) ?? "(no preview)";
       const time = msg.scheduled_time_formatted ?? "unknown";
       process.stderr.write(`[${msg.id}] +${msg.phone_number} — ${msg.message_type} — ${time}\n`);
       process.stderr.write(`       ${preview}\n`);

@@ -7,6 +7,12 @@
  * Usage:
  *   node scripts/login.js --email you@example.com --password "Secure@123"
  *
+ * Security Note:
+ *   --password is visible in the OS process list (ps aux / /proc/<pid>/cmdline)
+ *   for the duration the process runs. On shared/monitored systems, prefer
+ *   passing credentials via a wrapper or environment-level secret injection
+ *   rather than bare CLI flags visible to other processes.
+ *
  * Output (success):
  *   { "ok": true, "data": { "authToken": "eyJ..." } }
  *
