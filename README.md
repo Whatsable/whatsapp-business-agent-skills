@@ -762,6 +762,18 @@ Compatible agents (partial list): OpenClaw, Cursor, Claude Code, GitHub Copilot,
 
 ---
 
+## Testing
+
+A complete test suite covering all 57 scripts is available in [`TESTING.md`](TESTING.md).
+
+It includes:
+- Unit test prompts for every individual script
+- Integration workflow tests (onboarding, broadcast campaigns, chat triage, etc.)
+- Error & edge case tests (expired token, 24h window, degraded connection, destroy guards)
+- A `smoke-test.sh` script for quick read-only validation of all live endpoints
+
+---
+
 ## Learn More
 
 | Resource | Link |
