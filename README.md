@@ -2,9 +2,9 @@
 
 <img src="https://res.cloudinary.com/subframe/image/upload/v1756457825/uploads/4086/b4ynd9jid16pcby8cfz0.svg" alt="Notifyer by WhatsAble" height="40" />
 
-> **v0.1.0 — Phase 1 complete.** The `setup-notifyer` skill is production-ready. Skills for `automate-notifyer` and `chat-notifyer` are planned for Phase 2.
+> **v0.3.0 — All three phases complete.** `setup-notifyer`, `automate-notifyer`, and `chat-notifyer` are all production-ready.
 
-Agent Skills for [Notifyer by WhatsAble](https://notifyer-systems.com) — built on the open [AgentSkills](https://agentskills.io) format. These skills teach AI coding agents how to authenticate, configure, and manage a Notifyer workspace programmatically, using the same API surface as the Notifyer Console and Chat applications.
+Agent Skills for [Notifyer by WhatsAble](https://notifyer-systems.com) — built on the open [AgentSkills](https://agentskills.io) format. These skills teach AI coding agents how to authenticate, configure, and operate a Notifyer workspace programmatically, using the same API surface as the Notifyer Console and Chat applications.
 
 Works across any compatible agent — **OpenClaw, Cursor, Claude Code, GitHub Copilot, Gemini CLI, Amp, Roo Code, Junie, OpenHands**, and [many more](https://agentskills.io).
 
@@ -20,6 +20,8 @@ Works across any compatible agent — **OpenClaw, Cursor, Claude Code, GitHub Co
 - [Authentication Modes](#authentication-modes)
 - [Available Skills](#available-skills)
 - [Script Reference — setup-notifyer](#script-reference--setup-notifyer)
+- [Script Reference — automate-notifyer](#script-reference--automate-notifyer)
+- [Script Reference — chat-notifyer](#script-reference--chat-notifyer)
 - [Use Cases — What AI Agents Can Do](#use-cases--what-ai-agents-can-do)
 - [Limitations](#limitations)
 - [Repository Structure](#repository-structure)
@@ -30,9 +32,9 @@ Works across any compatible agent — **OpenClaw, Cursor, Claude Code, GitHub Co
 
 ## What is this?
 
-Notifyer is a WhatsApp Business automation platform by WhatsAble. It lets businesses connect their WhatsApp Business number, build message templates, manage team inboxes with labels and roles, run AI chatbots, and send automated messages through Make, Zapier, n8n, or a direct developer API.
+Notifyer is a WhatsApp Business automation platform by WhatsAble. It lets businesses connect their WhatsApp Business number, build message templates, manage team inboxes with labels and roles, run AI chatbots, send automated broadcasts, and integrate with Make, Zapier, n8n, or a direct developer API.
 
-This repository packages Notifyer's management capabilities as **Agent Skills** — a standardized, agent-readable format that any compatible AI coding agent can discover and use. Agents that load these skills can set up, configure, and manage Notifyer workspaces as part of larger automated workflows, without ever opening the browser console.
+This repository packages Notifyer's full management and chat capabilities as **Agent Skills** — a standardised, agent-readable format that any compatible AI coding agent can discover and use. Agents that load these skills can set up, configure, automate, and operate Notifyer workspaces as part of larger automated workflows, without ever opening the browser console.
 
 ---
 
@@ -51,7 +53,7 @@ This repository packages Notifyer's management capabilities as **Agent Skills** 
 If your agent supports the AgentSkills format, point it to this repository:
 
 ```bash
-npx skills add whatsable/notifyer-agent-skills
+npx skills add whatsable/agent-skills-by-notifyer
 ```
 
 The agent will discover all available skills and load them on demand.
@@ -59,10 +61,11 @@ The agent will discover all available skills and load them on demand.
 ### Manual clone
 
 ```bash
-git clone https://github.com/whatsable/notifyer-agent-skills
-cd notifyer-agent-skills/skills/setup-notifyer
-npm install   # no external dependencies; this sets up the package manifest only
+git clone https://github.com/Whatsable/agent-skills-by-notifyer
+cd agent-skills-by-notifyer
 ```
+
+Each skill is self-contained — no external dependencies. Run scripts directly with Node.js 18+.
 
 ---
 
@@ -77,392 +80,538 @@ export NOTIFYER_API_BASE_URL="https://api.insightssystem.com"
 **Step 2 — Log in and capture your token:**
 
 ```bash
+cd skills/setup-notifyer
 node scripts/login.js --email you@example.com --password "YourPassword@1"
 # Output: { "ok": true, "data": { "authToken": "eyJ..." } }
 export NOTIFYER_API_TOKEN="eyJ..."
 ```
 
-**Step 3 — Verify your identity:**
+**Step 3 — Verify identity and connection:**
 
 ```bash
-node scripts/get-me.js
-# Output: { "ok": true, "data": { "id": 1, "name": "Jane Smith", "role": "Super Admin", ... } }
-```
-
-**Step 4 — Check your WhatsApp connection:**
-
-```bash
+node scripts/get-me.js --pretty
 node scripts/get-connection-status.js --pretty
 ```
 
-**Step 5 — List your workspace labels:**
-
-```bash
-node scripts/list-labels.js --pretty
-```
-
-You are now ready to run any script in the `setup-notifyer` skill.
+You are now ready to run scripts from any of the three skills. The same `NOTIFYER_API_TOKEN` works across all skills.
 
 ---
 
 ## Environment Variables
 
-Set these before running any script:
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `NOTIFYER_API_BASE_URL` | **yes** | — | API host — always `https://api.insightssystem.com` |
+| `NOTIFYER_API_TOKEN` | **yes** (most scripts) | — | JWT from `login.js`. Not needed for `create-account.js` or `login.js` themselves. |
+| `NOTIFYER_CHAT_ORIGIN` | no | `https://chat.notifyer-systems.com` | CORS `Origin` header for chat endpoints. Only needed if your Notifyer instance uses a different domain. |
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `NOTIFYER_API_BASE_URL` | Yes | API host — always `https://api.insightssystem.com` |
-| `NOTIFYER_API_TOKEN` | Yes (most scripts) | JWT from `login.js`. Not needed for `create-account.js` or `login.js` themselves. |
+All variables are loaded by `scripts/lib/notifyer-api.js`. If a required variable is missing, the script exits immediately with a clear error.
 
-Both variables are loaded by `scripts/lib/notifyer-api.js` at runtime. If either is missing, the script exits immediately with a clear error message.
-
-### Persisting the token across sessions
-
-Add these lines to your shell profile (`~/.zshrc`, `~/.bashrc`, or `~/.profile`):
+### Persisting across sessions
 
 ```bash
+# Add to ~/.zshrc or ~/.bashrc
 export NOTIFYER_API_BASE_URL="https://api.insightssystem.com"
-export NOTIFYER_API_TOKEN="eyJ..."   # replace with your token
+export NOTIFYER_API_TOKEN="eyJ..."
 ```
 
-Tokens are JWTs with an expiry. If a script returns HTTP 401, run `login.js` again to refresh.
+Tokens are JWTs with an expiry. If a script returns HTTP 401, re-run `login.js` to refresh.
 
 ---
 
 ## Authentication Modes
 
-Notifyer's backend uses **three distinct authentication modes** depending on which API surface is called. All scripts handle this automatically — you only ever set `NOTIFYER_API_TOKEN` once.
+Notifyer's backend uses **three distinct auth modes** depending on which API surface is called. All scripts handle this automatically — you only ever set `NOTIFYER_API_TOKEN` once.
 
-| Mode | Header Format | Used For |
-|------|--------------|----------|
-| **Console** | `Authorization: Bearer <jwt>` | Account management, team, plans, WhatsApp status, API key retrieval |
-| **Chat** | `Authorization: <jwt>` (raw, no prefix) | Label CRUD (`/api:bVXsw_FD/web/label_management`), chat surface endpoints |
-| **Developer** | `Authorization: <api_key>` (raw, no prefix) | External automation — Make, Zapier, n8n, `send_template_message_by_api` |
+| Mode | Header Format | Used By |
+|------|--------------|---------|
+| **Console** | `Authorization: Bearer <jwt>` | `setup-notifyer` + most of `automate-notifyer` |
+| **Chat** | `Authorization: <jwt>` (raw, no prefix) | `chat-notifyer` + label scripts |
+| **Developer** | `Authorization: <api_key>` (raw) | External tools: Make, Zapier, n8n |
 
-The `NOTIFYER_API_TOKEN` (the JWT from `login.js`) is used for both Console and Chat modes. The Developer API key is a **separate credential** retrieved with `get-api-key.js`. It is used by third-party tools, not by these scripts directly.
+The **same JWT** from `login.js` works for both Console and Chat modes — only the header format differs. Scripts automatically select the correct mode. The Developer API key is a separate credential retrieved with `get-api-key.js`.
 
 ---
 
 ## Available Skills
 
-| Skill | Status | Description |
-|-------|--------|-------------|
-| `setup-notifyer` | **Production-ready** | Account creation, login, WhatsApp connection, plans, team & roles, labels, Developer API key |
-| `automate-notifyer` | Planned (Phase 2) | Templates, AI bots, broadcasts, analytics, webhooks |
-| `chat-notifyer` | Planned (Phase 2) | Send messages, conversation labels, chat handoff, scheduled messages, notes |
+| Skill | Status | Phase | Description |
+|-------|--------|-------|-------------|
+| [`setup-notifyer`](skills/setup-notifyer/) | **Production-ready** | 1 | Account, WhatsApp connection, plans, team & roles, labels, Developer API key |
+| [`automate-notifyer`](skills/automate-notifyer/) | **Production-ready** | 2 | Templates, AI bots, broadcasts, analytics, webhooks |
+| [`chat-notifyer`](skills/chat-notifyer/) | **Production-ready** | 3 | Recipients, messaging, labels, AI handoff, scheduled messages, notes |
+
+All three skills use the same `NOTIFYER_API_TOKEN`. Run scripts from within each skill's directory.
 
 ---
 
 ## Script Reference — setup-notifyer
 
-All scripts are in `skills/setup-notifyer/scripts/`. Run from the `setup-notifyer` directory:
-
 ```bash
 cd skills/setup-notifyer
-node scripts/<script-name>.js [flags]
+node scripts/<script>.js [flags]
 ```
-
-All scripts output **structured JSON** to stdout and human-readable summaries to stderr (with `--pretty`). Pipe stdout to `jq` for further processing.
 
 ### Account
 
-| Script | Endpoint | Description |
-|--------|----------|-------------|
-| `create-account.js` | `POST /api:-4GSCDHb/auth/signup` | Create a new Notifyer workspace account |
-| `login.js` | `POST /api:-4GSCDHb/auth/login` | Login and get a JWT auth token |
-| `get-me.js` | `GET /api:-4GSCDHb/auth/me` | Get the authenticated user's profile |
+| Script | Description |
+|--------|-------------|
+| `create-account.js` | Create a new Notifyer workspace |
+| `login.js` | Login and get a JWT auth token |
+| `get-me.js` | Get the authenticated user's profile |
 
 ```bash
-# Create a new account
-node scripts/create-account.js \
-  --name "Jane Smith" \
-  --email jane@company.com \
-  --password "Secure@123" \
-  --phone 14155550123 \
-  --reason "Automate customer support"   # optional
-
-# Login
-node scripts/login.js --email jane@company.com --password "Secure@123"
-
-# Get current user
-node scripts/get-me.js
+node scripts/create-account.js --name "Jane" --email jane@co.com --password "Pass@1"
+node scripts/login.js --email jane@co.com --password "Pass@1"
+node scripts/get-me.js --pretty
 ```
 
 ### WhatsApp Connection
 
-| Script | Endpoint | Description |
-|--------|----------|-------------|
-| `get-connection-status.js` | `GET /api:P5grzx1u/is_user_embedded` | Check Meta registration and subscription status |
-| `refresh-connection.js` | `POST /api:P5grzx1u/refresher_of_registration_subscription` | Force re-sync with Meta's WhatsApp Business API |
+| Script | Description |
+|--------|-------------|
+| `get-connection-status.js` | Check Meta registration and subscription status |
+| `refresh-connection.js` | Force re-sync with Meta's WhatsApp Business API |
 
 ```bash
 node scripts/get-connection-status.js --pretty
 node scripts/refresh-connection.js --pretty
 ```
 
+> **Note:** Initial WhatsApp connection (QR scan / embedded signup) must be done once via the Notifyer console UI. These scripts manage the connection after it is established.
+
 ### Plans & Usage
 
-| Script | Endpoint | Description |
-|--------|----------|-------------|
-| `list-plans.js` | `GET /api:JZAUyiCs/plans?filter=…` | List all subscription plans and pricing tiers |
-| `get-user-plan.js` | `GET /api:JZAUyiCs/user_plan` | Current subscription status and usage |
+| Script | Description |
+|--------|-------------|
+| `list-plans.js` | List all subscription plans and pricing tiers |
+| `get-user-plan.js` | Current subscription status and usage limits |
 
 ```bash
 node scripts/list-plans.js --pretty
-node scripts/list-plans.js --tier pro --billing monthly
 node scripts/get-user-plan.js --pretty
 ```
 
 ### Team & Roles
 
-| Script | Endpoint | Description |
-|--------|----------|-------------|
-| `list-members.js` | `GET /api:-4GSCDHb/auth/get_team_member` | List all team members |
-| `invite-member.js` | `POST /api:-4GSCDHb/auth/create_team_member` | Create a team member account |
-| `update-member.js` | `PATCH /api:-4GSCDHb/auth/user` | Update role, labels, name, or password |
-| `remove-member.js` | `DELETE /api:-4GSCDHb/auth/delete_team_member/:id` | Permanently remove a team member |
+| Script | Description |
+|--------|-------------|
+| `list-members.js` | List all team members |
+| `invite-member.js` | Create a team member account |
+| `update-member.js` | Update role, labels, name, or password |
+| `remove-member.js` | Permanently remove a team member |
 
 ```bash
-# List members with available labels
 node scripts/list-members.js --labels --pretty
-
-# Add a team member
-node scripts/invite-member.js \
-  --name "John Doe" \
-  --email john@company.com \
-  --password "Secure@2024" \
-  --role "Team Member" \
-  --labels "Sales,Support"
-
-# Change role
+node scripts/invite-member.js --name "John" --email john@co.com --password "Pass@1" --role "Team Member" --labels "Sales,Support"
 node scripts/update-member.js --id <uuid> --role Admin
-
-# Assign labels (replaces current list)
-node scripts/update-member.js --id <uuid> --labels "VIP,Support"
-
-# Remove member (requires confirmation)
 node scripts/remove-member.js --id <uuid> --confirm
 ```
 
-Roles: `Admin` | `Team Member (All Labels)` | `Team Member`. `Super Admin` is the account owner and cannot be modified.
+Roles: `Admin` | `Team Member (All Labels)` | `Team Member`
 
 ### Labels
 
-| Script | Endpoint | Description |
-|--------|----------|-------------|
-| `list-labels.js` | `GET /api:bVXsw_FD/web/label_management` | List workspace labels (role-filtered) |
-| `create-label.js` | `POST /api:bVXsw_FD/web/label_management` | Create a new label |
-| `update-label-keywords.js` | `PATCH /api:bVXsw_FD/web/label_management/:id` | Update label name or keywords |
-| `delete-label.js` | `DELETE /api:bVXsw_FD/web/label_management/:id` | Permanently delete a label |
+| Script | Description |
+|--------|-------------|
+| `list-labels.js` | List workspace labels |
+| `create-label.js` | Create a label with optional auto-assignment keywords |
+| `update-label-keywords.js` | Update label name or keywords |
+| `delete-label.js` | Permanently delete a label |
 
 ```bash
-# List labels
-node scripts/list-labels.js --pretty
-
-# Create a label with auto-assignment keywords
-node scripts/create-label.js --label "Sales" --keywords "buy,purchase,pricing,quote"
-
-# Add keywords to an existing label
-node scripts/update-label-keywords.js --id 5 --add "urgent,priority"
-
-# Remove a keyword
-node scripts/update-label-keywords.js --id 5 --remove "old-keyword"
-
-# Replace all keywords
-node scripts/update-label-keywords.js --id 5 --set "buy,order"
-
-# Rename a label
-node scripts/update-label-keywords.js --id 5 --label "VIP Customers"
-
-# Delete (requires confirmation)
+node scripts/create-label.js --label "Sales" --keywords "buy,pricing,quote"
+node scripts/update-label-keywords.js --id 5 --add "urgent"
 node scripts/delete-label.js --id 5 --confirm
 ```
 
-> Labels use **chat auth** — the same `NOTIFYER_API_TOKEN` works; `notifyer-api.js` handles the header format difference automatically.
-
 ### Developer API Key
 
-| Script | Endpoint | Description |
-|--------|----------|-------------|
-| `get-api-key.js` | `GET /api:-4GSCDHb/api_key` | Retrieve the Developer API key for Make/Zapier/n8n |
+| Script | Description |
+|--------|-------------|
+| `get-api-key.js` | Retrieve the Developer API key for Make/Zapier/n8n |
 
 ```bash
-node scripts/get-api-key.js
-node scripts/get-api-key.js --pretty   # prints key to stderr for easy copying
+node scripts/get-api-key.js --pretty
 ```
 
-> **Pro or Agency plan required** to use the API key with Make/Zapier/n8n. Basic (Bulk Message) accounts are blocked. Check eligibility with `get-user-plan.js`.
->
-> When setting up Make or Zapier, use the **"Notifyer Systems"** module — not the "WhatsAble" module.
+> Pro or Agency plan required. Use the **"Notifyer Systems"** module in Make/Zapier.
+
+---
+
+## Script Reference — automate-notifyer
+
+```bash
+cd skills/automate-notifyer
+node scripts/<script>.js [flags]
+```
+
+### Templates
+
+| Script | Description |
+|--------|-------------|
+| `list-templates.js` | List all approved and pending templates |
+| `get-template.js` | Fetch a single template by name or ID |
+| `create-template.js` | Submit a template for Meta approval |
+
+```bash
+node scripts/list-templates.js --pretty
+node scripts/create-template.js --name "order_confirm" --category UTILITY --body "Hello {{1}}, your order {{2}} is confirmed." --variables 2
+```
+
+> **Side effect:** `list-templates.js` auto-syncs PENDING templates from Meta on each call.
+
+### AI Bots
+
+| Script | Description |
+|--------|-------------|
+| `list-bots.js` | List all AI bots |
+| `get-bot.js` | Fetch a single bot by ID |
+| `create-bot.js` | Create an AI bot (backed by OpenAI Assistant) |
+
+```bash
+node scripts/list-bots.js --pretty
+node scripts/create-bot.js --name "Support Bot" --instructions "You are a helpful support agent." --model gpt-4o
+```
+
+### Broadcasts
+
+| Script | Description |
+|--------|-------------|
+| `list-broadcasts.js` | List broadcasts by status (upcoming/previous/ongoing) |
+| `get-broadcast.js` | Fetch a single broadcast by ID or name |
+| `create-broadcast.js` | Create and schedule a broadcast (3-step flow) |
+
+```bash
+node scripts/list-broadcasts.js --require upcoming --pretty
+node scripts/create-broadcast.js \
+  --name "Jan Promo" \
+  --template tmpl_abc123 \
+  --recipients recipients.csv \
+  --schedule "25/01/2025 10:00"
+```
+
+### Analytics
+
+| Script | Description |
+|--------|-------------|
+| `get-message-analytics.js` | Summary stats — sent, delivered, read rates |
+| `get-message-logs.js` | Per-message logs with phone/type filter |
+
+```bash
+node scripts/get-message-analytics.js --from "01/01/2025" --to "31/01/2025" --pretty
+node scripts/get-message-logs.js --phone 14155550123 --pretty
+```
+
+### Webhooks
+
+| Script | Description |
+|--------|-------------|
+| `list-webhooks.js` | List dev or IO webhooks (`--type dev\|io`) |
+| `create-webhook.js` | Create a webhook with triggers and optional HMAC signature |
+| `update-webhook.js` | Update URL, status, or triggers (fetch-then-patch) |
+| `delete-webhook.js` | Delete a webhook (`--confirm` required) |
+
+```bash
+node scripts/list-webhooks.js --type dev --pretty
+node scripts/create-webhook.js --type dev --url https://my.app/webhook --incoming --outgoing --signature
+node scripts/delete-webhook.js --type dev --id 3 --confirm
+```
+
+---
+
+## Script Reference — chat-notifyer
+
+```bash
+cd skills/chat-notifyer
+node scripts/<script>.js [flags]
+```
+
+### Recipients
+
+| Script | Description |
+|--------|-------------|
+| `list-recipients.js` | List/search all conversation contacts |
+| `get-recipient.js` | Fetch a single recipient by phone number |
+| `filter-recipients-by-label.js` | List recipients filtered by label(s) |
+| `update-recipient.js` | Update recipient display name |
+
+```bash
+node scripts/list-recipients.js --search "John" --pretty
+node scripts/get-recipient.js --phone 14155550123 --pretty
+node scripts/filter-recipients-by-label.js --labels "Support" --status unread --pretty
+node scripts/update-recipient.js --phone 14155550123 --name "John Doe"
+```
+
+### Messaging
+
+| Script | Description |
+|--------|-------------|
+| `send-text.js` | Send a free-text message (24h window required) |
+| `send-template.js` | Send a template message (works any time) |
+| `send-attachment.js` | Upload a file and send it as a media message |
+
+```bash
+# Check 24h window first:
+node scripts/get-recipient.js --phone 14155550123 --pretty
+
+# Send text (window open):
+node scripts/send-text.js --phone 14155550123 --text "Hello! How can I help?"
+
+# Send template (works even if window closed):
+node scripts/send-template.js --phone 14155550123 --template tmpl_abc123 \
+  --variables '{"body1":"John","body2":"#12345"}'
+
+# Send attachment:
+node scripts/send-attachment.js --phone 14155550123 --file ./invoice.pdf --pretty
+```
+
+> **24h Window Rule:** WhatsApp only allows free-text and attachment messages within 24 hours of the recipient's last inbound message. When the window is closed, use `send-template.js`.
+
+### Labels
+
+| Script | Description |
+|--------|-------------|
+| `assign-label.js` | Assign a label to a recipient conversation |
+| `remove-label.js` | Remove a label from a recipient conversation |
+
+```bash
+node scripts/assign-label.js --phone 14155550123 --label "Support" --pretty
+node scripts/remove-label.js --phone 14155550123 --label "Support" --pretty
+```
+
+### AI Handoff
+
+| Script | Description |
+|--------|-------------|
+| `set-handoff.js` | Toggle AI bot ↔ human agent mode |
+| `assign-bot.js` | Assign a specific AI bot to a recipient |
+| `list-bots.js` | List all AI bots (get IDs for assign-bot.js) |
+
+```bash
+# Human takes over:
+node scripts/set-handoff.js --phone 14155550123 --mode human --pretty
+
+# Return to bot:
+node scripts/set-handoff.js --phone 14155550123 --mode bot
+
+# Assign a specific bot:
+node scripts/list-bots.js --pretty
+node scripts/assign-bot.js --phone 14155550123 --bot-id 5
+```
+
+### Scheduled Messages
+
+| Script | Description |
+|--------|-------------|
+| `list-scheduled.js` | View all queued scheduled messages |
+| `delete-scheduled.js` | Cancel a scheduled message |
+
+```bash
+# Schedule a message (works with send-text, send-template, send-attachment):
+node scripts/send-template.js --phone 14155550123 --template tmpl_abc123 --schedule "25/01/2025 14:00"
+
+# Manage scheduled messages:
+node scripts/list-scheduled.js --pretty
+node scripts/delete-scheduled.js --id 7 --confirm
+```
+
+### Notes & Conversation History
+
+| Script | Description |
+|--------|-------------|
+| `add-note.js` | Set, append, or clear the manual note on a recipient |
+| `get-notes.js` | Read manual + AI-generated notes |
+| `get-conversation-log.js` | Read outbound message history for a phone number |
+
+```bash
+node scripts/get-notes.js --phone 14155550123 --pretty
+node scripts/add-note.js --phone 14155550123 --note "VIP — apply 15% discount"
+node scripts/add-note.js --phone 14155550123 --append "Follow up on 15 Feb"
+node scripts/get-conversation-log.js --phone 14155550123 --all --pretty
+```
 
 ---
 
 ## Use Cases — What AI Agents Can Do
 
-The following workflows are fully achievable today with Phase 1 scripts.
-
 ### Workspace Onboarding Automation
 
-An agent can fully onboard a new Notifyer workspace without any manual browser interaction:
+An agent can fully onboard a new Notifyer workspace:
 
-1. **Create the account** — `create-account.js`
-2. **Log in and capture the token** — `login.js`
-3. **Verify identity** — `get-me.js`
-4. **Check plan status** — `get-user-plan.js` (confirm `status` is `active` or `trialing`)
-5. **Check WhatsApp connection** — `get-connection-status.js` (confirm `isConnected: true`)
-6. **Create workspace labels** — `create-label.js` (e.g. `Sales`, `Support`, `VIP`)
-7. **Add team members** — `invite-member.js` for each member
-8. **Assign labels to members** — `update-member.js --labels`
-9. **Retrieve Developer API key** — `get-api-key.js`
+1. `create-account.js` — create the workspace
+2. `login.js` — get the auth token
+3. `get-user-plan.js` — verify subscription is active
+4. `get-connection-status.js` — confirm WhatsApp is connected
+5. `create-label.js` — create labels (`Sales`, `Support`, `VIP`)
+6. `invite-member.js` — add team members
+7. `update-member.js --labels` — assign labels to each member
+8. `get-api-key.js` — retrieve the developer key for Make/Zapier/n8n
 
-A single agent prompt like *"Set up a Notifyer workspace for Acme Corp with a Sales team of 3 agents"* can drive all 9 steps automatically.
-
----
-
-### Dynamic Team Management
-
-An agent can manage team structure in response to real business events:
-
-- **On-board a new hire**: `invite-member.js` → `update-member.js --labels` — account is live in seconds
-- **Promote an agent**: `update-member.js --role Admin` — access is updated immediately
-- **Reassign on sick leave**: `update-member.js --labels "Urgent"` — reroute conversations to available agents
-- **Off-board an employee**: `list-members.js` to find ID → `remove-member.js --confirm`
-- **Audit team structure**: `list-members.js --labels --pretty` — see all roles and label assignments at a glance
+A single prompt like *"Set up a Notifyer workspace for Acme Corp with a Sales team of 3 agents"* can drive all 8 steps.
 
 ---
 
-### Label Taxonomy Management
-
-Labels are the core routing mechanism in Notifyer Chat. An agent can manage the full taxonomy:
-
-- **Bootstrap labels from a CRM category list**: loop `create-label.js` per category
-- **Set keyword triggers**: `create-label.js --keywords "buy,price,quote"` — conversations are auto-labeled on arrival
-- **Refine keywords over time**: `update-label-keywords.js --add "deal,offer"` without disturbing existing assignments
-- **Rename a label without losing history**: `update-label-keywords.js --label "New Name"` — ID remains stable
-- **Clean up stale labels**: `list-labels.js | jq` to find unused ones → `delete-label.js --confirm`
-- **Propagate changes**: after deleting a label, `list-members.js` to identify affected members, then `update-member.js --labels` to reassign
-
----
-
-### API Integration Setup (Make / Zapier / n8n)
-
-An agent guiding a user through a no-code automation setup can:
-
-1. **Check plan eligibility** — `get-user-plan.js` (must be Pro or Agency)
-2. **Check WhatsApp is live** — `get-connection-status.js` (`isConnected: true` required before sending)
-3. **Retrieve the API key** — `get-api-key.js --pretty` — key is printed clearly for the user to copy
-4. **Provide the correct endpoint** — `POST /api:hFrjh8a1/send_template_message_by_api` with fields `phone_number`, `template`, `__self`
-5. **Confirm the right module** — remind the user to use "Notifyer Systems" in Make/Zapier, not "WhatsAble"
-
-This removes friction from the most common integration support question entirely.
-
----
-
-### Pre-flight Checks Before Sending Messages
-
-Before any automation sends a WhatsApp message, an agent can gate the action with:
+### Template Lifecycle Management
 
 ```bash
-# 1. Is the WhatsApp number connected and ready?
-node scripts/get-connection-status.js
-# → check: isConnected === true
+# Create a template
+node scripts/create-template.js --name "order_shipped" --category UTILITY \
+  --body "Hi {{1}}, your order {{2}} has shipped!" --variables 2
 
-# 2. Is the subscription active and within usage limits?
-node scripts/get-user-plan.js
-# → check: status ∈ ["active","trialing"] AND usages < unique_number_limit
+# Monitor approval status
+node scripts/list-templates.js --pretty   # auto-syncs PENDING status from Meta
 
-# 3. Is the plan tier capable of API sending?
-node scripts/list-plans.js --tier pro   # compare stripe_price_id
+# Use the approved template in a broadcast
+node scripts/create-broadcast.js --template order_shipped --recipients customers.csv \
+  --schedule "25/01/2025 09:00"
 ```
 
-This prevents failed sends and proactively surfaces issues (stale connection, expired subscription, contact limit reached) before the user notices.
+---
+
+### Full Chat Operation Workflow
+
+```bash
+# 1. Check who needs attention (unread, high-priority label)
+node scripts/filter-recipients-by-label.js --labels "VIP" --status unread --pretty
+
+# 2. Get full context on a contact
+node scripts/get-recipient.js --phone 14155550123 --pretty
+node scripts/get-notes.js --phone 14155550123 --pretty
+node scripts/get-conversation-log.js --phone 14155550123 --pretty
+
+# 3. Take over from the bot and respond
+node scripts/set-handoff.js --phone 14155550123 --mode human
+node scripts/send-text.js --phone 14155550123 --text "Hi John! I'm looking into this now."
+
+# 4. Update notes with context
+node scripts/add-note.js --phone 14155550123 --note "Escalated — awaiting refund approval"
+
+# 5. Assign the right label and return to bot
+node scripts/assign-label.js --phone 14155550123 --label "Escalated"
+node scripts/set-handoff.js --phone 14155550123 --mode bot
+```
 
 ---
 
-### Health Check / Monitoring Script
+### AI-Driven Customer Support Triage
 
-An agent can run a periodic workspace health check:
+An agent can continuously process incoming conversations:
+
+1. `list-recipients.js --status unread` — find new conversations
+2. `get-recipient.js` — check 24h window and AI mode status
+3. `get-notes.js` — load context (manual + AI notes)
+4. `get-conversation-log.js` — read recent message history
+5. Decide: escalate, respond, or route
+6. `assign-label.js` — categorise the conversation
+7. `send-template.js` — send an acknowledgement if window is closed
+8. `set-handoff.js --mode human` — escalate complex cases
+
+---
+
+### Broadcast Campaign Management
 
 ```bash
-node scripts/get-me.js              # confirm token is valid
-node scripts/get-connection-status.js --pretty   # WhatsApp status
-node scripts/get-user-plan.js --pretty           # subscription + usage
+# Plan and schedule a campaign
+node scripts/list-templates.js --pretty         # pick an approved template
+node scripts/get-user-plan.js --pretty          # check usage limits
+node scripts/create-broadcast.js \
+  --name "Feb Promo" \
+  --template tmpl_promo \
+  --recipients customers.csv \
+  --schedule "01/02/2025 10:00"
+
+# Monitor in progress
+node scripts/list-broadcasts.js --require ongoing --pretty
+
+# Review results
+node scripts/get-message-analytics.js --from "01/02/2025" --to "28/02/2025" --pretty
+node scripts/get-message-logs.js --filter broadcast --pretty
+```
+
+---
+
+### Pre-flight Checks Before Sending
+
+Before any automation sends a message, an agent should gate on:
+
+```bash
+node scripts/get-connection-status.js   # WhatsApp connected?
+node scripts/get-user-plan.js           # subscription active, within limits?
+node scripts/get-recipient.js --phone <n> --pretty  # 24h window open?
+```
+
+This prevents failed sends and surfaces issues (stale connection, expired subscription, closed window) proactively.
+
+---
+
+### Webhook + Automation Integration
+
+```bash
+# Set up an outgoing webhook to receive message events
+node scripts/create-webhook.js --type dev --url https://my.app/hook --incoming --outgoing --signature
+
+# Set up an IO webhook for Make/Zapier/n8n event-driven automations
+node scripts/create-webhook.js --type io --url https://hook.eu2.make.com/xyz --outgoing --schedule-activity
+
+# Monitor configured webhooks
+node scripts/list-webhooks.js --type dev --pretty
+node scripts/list-webhooks.js --type io --pretty
+```
+
+---
+
+### Workspace Health Check
+
+```bash
+node scripts/get-me.js --pretty                  # token valid?
+node scripts/get-connection-status.js --pretty   # WhatsApp live?
+node scripts/get-user-plan.js --pretty           # plan active, usage OK?
 node scripts/list-members.js --pretty            # team structure
 node scripts/list-labels.js --pretty             # label inventory
+node scripts/list-bots.js --pretty               # AI bots active?
+node scripts/list-webhooks.js --type dev --pretty # webhooks configured?
 ```
 
-All output is structured JSON, making it trivial to pipe into monitoring tools, alert on anomalies, or log to a dashboard.
-
----
-
-### Scripted Workspace Cloning
-
-When onboarding multiple clients on a white-label setup, an agent can replicate a workspace template:
-
-1. **Export the source workspace's labels** — `list-labels.js | jq '.data.labels'`
-2. **Export the source team structure** — `list-members.js | jq '.data.items'`
-3. **Create the new workspace** — `create-account.js`
-4. **Recreate labels** — loop `create-label.js` for each label + keyword set
-5. **Recreate team members** — loop `invite-member.js` + `update-member.js`
+All outputs are structured JSON — trivially pipeable to monitoring tools or dashboards.
 
 ---
 
 ## Limitations
 
-The following constraints exist in the current Notifyer API surface and cannot be worked around programmatically:
-
-### Plan & Billing
+### Hard Limits (cannot be scripted by design)
 
 | Limitation | Details |
 |-----------|---------|
-| **No programmatic subscription creation** | Stripe checkout requires a browser redirect. Agents cannot subscribe, upgrade, or downgrade a plan on behalf of a user. Direct users to [console.notifyer-systems.com/pricing-plans](https://console.notifyer-systems.com/pricing-plans). |
+| **WhatsApp initial connection is browser-only** | The QR scan / embedded signup (Meta OAuth flow) requires a browser. An agent can check and refresh an existing connection, but cannot perform the first-time WABA setup. Direct users to [console.notifyer-systems.com](https://console.notifyer-systems.com). |
+| **Plan upgrades/downgrades require the console UI** | Stripe checkout requires a browser redirect. `list-plans.js` and `get-user-plan.js` are read-only. |
+| **Template approval is Meta's process** | `create-template.js` submits to Meta. Approval takes 24–72 hours and cannot be expedited via API. Templates must reach `APPROVED` status before use. |
+| **Templates cannot be edited after approval** | Create a new template with a different name. There is no update-template endpoint. |
+| **Broadcasts cannot be cancelled once scheduled** | No delete-broadcast endpoint exists in the API. |
+| **AI bot requires OpenAI API key in Notifyer settings** | `create-bot.js` fails if the workspace has no valid OpenAI key — set this in the console UI. |
+| **Password recovery is browser-only** | No password reset API endpoint. |
+
+### API & Messaging Constraints
+
+| Limitation | Details |
+|-----------|---------|
+| **24h window enforced by WhatsApp server-side** | Scripts cannot bypass it. Use `send-template.js` when the window is closed. |
+| **Outbound-only message history** | `get-conversation-log.js` shows messages sent by Notifyer. Inbound messages from customers are not in the log — view them in [chat.notifyer-systems.com](https://chat.notifyer-systems.com). |
+| **No bulk send from chat scripts** | For bulk messaging, use `automate-notifyer/create-broadcast.js`. |
+| **`note_auto` (AI note) is read-only** | AI-generated notes are written by Notifyer's internal AI — cannot be set or cleared via API. |
+| **`DELETE /webhook/dev/:id` is a public endpoint** | Relies only on CORS origin check (no user auth). Do not expose dev webhook IDs to untrusted parties. |
+| **IO webhook ID is a text UUID** | Unlike integer dev webhook IDs. Always treat IO webhook IDs as strings. |
+| **No token refresh endpoint** | When the JWT expires (HTTP 401), re-run `login.js` for a fresh token. |
+
+### Role Constraints
+
+| Limitation | Details |
+|-----------|---------|
+| **Super Admin role is immutable** | Cannot be modified, demoted, or deleted by any script. |
+| **Email is immutable after account creation** | Team member email addresses cannot be changed. |
+| **Team Member token restricts recipient visibility** | Xano server-side filters recipients to the member's assigned label scope — scripts cannot override this. |
+| **Label deletion does not cascade** | When a label is deleted, members with that label assigned are NOT automatically updated. Run `update-member.js --labels` to reassign them. |
 | **API key requires Pro or Agency plan** | Basic (Bulk Message) accounts cannot use the Developer API or Make/Zapier/n8n. |
-| **No API key rotation** | The Developer API key is fixed per workspace. There is no rotate/regenerate endpoint. |
-
-### WhatsApp Connection
-
-| Limitation | Details |
-|-----------|---------|
-| **Embedded Signup is browser-only** | Connecting a WhatsApp Business number requires the Meta OAuth flow in a browser. An agent can check and refresh connection status, but cannot perform the initial connection. |
-| **Meta daily rate limit on refresh** | `refresh-connection.js` re-triggers Meta's registration process. Meta limits this per day. If the daily limit is hit, wait 24 hours. |
-| **1:1 number model** | Each Notifyer account (non-Agency) is connected to exactly one WhatsApp Business number. |
-
-### Team & Members
-
-| Limitation | Details |
-|-----------|---------|
-| **Super Admin is immutable** | The account owner (Super Admin) cannot be modified, demoted, or deleted by any script. |
-| **Email is immutable after creation** | A team member's email address cannot be changed. |
-| **No email invitation flow** | `invite-member.js` creates the account immediately with a password. There is no "pending invite" state. Share credentials with new members out-of-band. |
-| **Member list paginates at 200** | `update-member.js` and `remove-member.js` fetch up to 200 members for pre-flight verification. Workspaces with more than 200 members require manual ID lookup. |
-
-### Labels
-
-| Limitation | Details |
-|-----------|---------|
-| **Label names must be unique** | Creating a label with a duplicate name returns a blocked error. |
-| **No GET-by-ID in the web group** | Fetching a specific label by ID is not available. `update-label-keywords.js` and `delete-label.js` fetch the full list first, then filter. |
-| **Deleting a label does not cascade** | When a label is deleted, it is NOT automatically removed from team members that had it assigned. Manually update affected members with `update-member.js --labels`. |
-| **Keywords are case-sensitive** | Keyword matching in auto-assignment is case-sensitive. |
-
-### Messaging & Phase 2 Features
-
-| Limitation | Details |
-|-----------|---------|
-| **No template sending in Phase 1** | Sending WhatsApp template messages (`send_template_message_by_api`) is documented in `api-key-reference.md` but does not yet have a dedicated script. Use the Developer API directly or wait for Phase 2. |
-| **No chat surface scripts yet** | Sending text/media messages, conversation management, scheduled messages, AI bot assignment, chat handoff, and notes are all Phase 2. |
-| **No broadcast scripts yet** | Creating and sending bulk broadcasts is Phase 2. |
-| **No template management scripts yet** | Creating, editing, and listing message templates is Phase 2. |
-| **No analytics scripts yet** | Message delivery stats and read rates are Phase 2. |
-| **No webhook management scripts yet** | Configuring incoming/outgoing webhooks and the developer event endpoint is Phase 2. |
-
-### General
-
-| Limitation | Details |
-|-----------|---------|
-| **Node.js 18+ required** | Scripts use native `fetch`, top-level await patterns, and ESM modules. Node 16 and below are not supported. |
-| **Tokens expire** | JWTs have an expiry. If a script returns HTTP 401, re-run `login.js` to get a fresh token. |
-| **No token refresh automation** | There is no token refresh endpoint. When the token expires, a full `login.js` call is required. |
 
 ---
 
@@ -470,43 +619,79 @@ The following constraints exist in the current Notifyer API surface and cannot b
 
 ```
 agent-skills-by-notifyer/
-├── README.md                          ← You are here
+├── README.md
 └── skills/
-    └── setup-notifyer/                ← Phase 1: workspace configuration
-        ├── SKILL.md                   ← Agent entrypoint (loaded by compatible agents)
+    ├── setup-notifyer/                     ← Phase 1: workspace setup & infra
+    │   ├── SKILL.md                        ← Agent entrypoint
+    │   ├── package.json
+    │   ├── scripts/
+    │   │   ├── lib/                        ← Shared: notifyer-api.js, args.js, result.js
+    │   │   ├── create-account.js
+    │   │   ├── login.js
+    │   │   ├── get-me.js
+    │   │   ├── get-connection-status.js
+    │   │   ├── refresh-connection.js
+    │   │   ├── list-plans.js
+    │   │   ├── get-user-plan.js
+    │   │   ├── list-members.js
+    │   │   ├── invite-member.js
+    │   │   ├── update-member.js
+    │   │   ├── remove-member.js
+    │   │   ├── list-labels.js
+    │   │   ├── create-label.js
+    │   │   ├── update-label-keywords.js
+    │   │   ├── delete-label.js
+    │   │   └── get-api-key.js
+    │   ├── references/                     ← API docs per feature area
+    │   └── assets/                         ← Example payloads
+    │
+    ├── automate-notifyer/                  ← Phase 2: automation & integrations
+    │   ├── SKILL.md
+    │   ├── package.json
+    │   ├── scripts/
+    │   │   ├── lib/
+    │   │   ├── list-templates.js
+    │   │   ├── get-template.js
+    │   │   ├── create-template.js
+    │   │   ├── list-bots.js
+    │   │   ├── get-bot.js
+    │   │   ├── create-bot.js
+    │   │   ├── list-broadcasts.js
+    │   │   ├── get-broadcast.js
+    │   │   ├── create-broadcast.js
+    │   │   ├── get-message-analytics.js
+    │   │   ├── get-message-logs.js
+    │   │   ├── list-webhooks.js
+    │   │   ├── create-webhook.js
+    │   │   ├── update-webhook.js
+    │   │   └── delete-webhook.js
+    │   ├── references/
+    │   └── assets/
+    │
+    └── chat-notifyer/                      ← Phase 3: live chat operations
+        ├── SKILL.md
         ├── package.json
         ├── scripts/
         │   ├── lib/
-        │   │   ├── notifyer-api.js    ← HTTP client (auth, JSON, errors)
-        │   │   ├── args.js            ← CLI argument parser
-        │   │   └── result.js          ← Standardized output helpers
-        │   ├── create-account.js
-        │   ├── login.js
-        │   ├── get-me.js
-        │   ├── get-connection-status.js
-        │   ├── refresh-connection.js
-        │   ├── list-plans.js
-        │   ├── get-user-plan.js
-        │   ├── list-members.js
-        │   ├── invite-member.js
-        │   ├── update-member.js
-        │   ├── remove-member.js
-        │   ├── list-labels.js
-        │   ├── create-label.js
-        │   ├── update-label-keywords.js
-        │   ├── delete-label.js
-        │   └── get-api-key.js
+        │   ├── list-recipients.js
+        │   ├── get-recipient.js
+        │   ├── filter-recipients-by-label.js
+        │   ├── update-recipient.js
+        │   ├── send-text.js
+        │   ├── send-template.js
+        │   ├── send-attachment.js
+        │   ├── assign-label.js
+        │   ├── remove-label.js
+        │   ├── set-handoff.js
+        │   ├── assign-bot.js
+        │   ├── list-bots.js
+        │   ├── list-scheduled.js
+        │   ├── delete-scheduled.js
+        │   ├── add-note.js
+        │   ├── get-notes.js
+        │   └── get-conversation-log.js
         ├── references/
-        │   ├── account-reference.md
-        │   ├── whatsapp-connection-reference.md
-        │   ├── plans-reference.md
-        │   ├── team-reference.md
-        │   ├── labels-reference.md
-        │   └── api-key-reference.md
         └── assets/
-            ├── signup-example.json
-            ├── connection-status-example.json
-            └── user-plan-example.json
 ```
 
 ---
@@ -523,9 +708,9 @@ my-skill/
 └── assets/           # Example payloads and fixtures
 ```
 
-Skills use **progressive disclosure**: agents load only the skill name and description at startup. The full `SKILL.md` — and any referenced scripts or docs — is loaded only when the agent determines it is relevant to the current task. This keeps context usage efficient.
+Skills use **progressive disclosure**: agents load only the skill name and description at startup. The full `SKILL.md` — and any referenced scripts or docs — is loaded only when the agent determines it is relevant to the current task.
 
-Compatible agents (partial list from [agentskills.io](https://agentskills.io)): OpenClaw, Cursor, Claude Code, GitHub Copilot, VS Code, Gemini CLI, Amp, Roo Code, Junie, OpenHands, Mux, Goose, Letta, Firebender, Factory, Piebald, TRAE, Spring AI, and more.
+Compatible agents (partial list): OpenClaw, Cursor, Claude Code, GitHub Copilot, VS Code, Gemini CLI, Amp, Roo Code, Junie, OpenHands, Mux, Goose, Letta, Firebender, Factory, Piebald, TRAE, Spring AI, and [many more](https://agentskills.io).
 
 ---
 
@@ -537,7 +722,6 @@ Compatible agents (partial list from [agentskills.io](https://agentskills.io)): 
 | Notifyer Chat | [chat.notifyer-systems.com](https://chat.notifyer-systems.com) |
 | Notifyer Documentation | [docs.whatsable.app](https://docs.whatsable.app) |
 | AgentSkills specification | [agentskills.io/specification](https://agentskills.io/specification) |
-| AgentSkills community | [github.com/agentskills/agentskills](https://github.com/agentskills/agentskills) |
 | WhatsAble | [notifyer-systems.com](https://notifyer-systems.com) |
 
 ---
