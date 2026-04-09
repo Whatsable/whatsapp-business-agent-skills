@@ -9,7 +9,7 @@ description: >
   chat handoff between AI bots and humans, schedule messages, or manage notes.
   Requires setup-notifyer to be configured first (NOTIFYER_API_TOKEN from login.js).
 license: Proprietary — © WhatsAble. All rights reserved.
-compatibility: Requires Node.js >= 18. Set NOTIFYER_API_BASE_URL and NOTIFYER_API_TOKEN before running any script. Optionally set NOTIFYER_CHAT_ORIGIN (default: https://chat.notifyer-systems.com).
+compatibility: Requires Node.js >= 18. Set NOTIFYER_API_BASE_URL and NOTIFYER_API_TOKEN before running any script.
 metadata:
   author: whatsable
   version: "0.1.0"
