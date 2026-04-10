@@ -2,7 +2,8 @@
 /**
  * send-attachment.js — Upload a file and send it as a WhatsApp media message.
  *
- * Step 1: POST /api:ox_LN9zX/upload_file_by_attachment  (multipart/form-data)
+ * Step 1: POST /api:bVXsw_FD/upload_file_by_attachment  (multipart/form-data, field "file")
+ *         (Legacy /api:ox_LN9zX/upload_file_by_attachment may 404 on some deployments.)
  * Step 2: POST /api:bVXsw_FD/web/send/<type>            (JSON)
  *           where <type> is: image | video | audio | document
  *
@@ -35,11 +36,9 @@
  *
  * Send Payload (Step 3) built by this script:
  *   {
- *     media_link: <uploaded_url>,     ← URL from upload response
- *     type: <mime_type>,              ← full MIME type string
- *     caption: <string|"">,
- *     currentRecipient: { ...full recipient object... },
- *     scheduled_time: <ms|0>
+ *     media_link, mime_type, caption,
+ *     type + document|image|video|audio  ← Meta shape, e.g. type "document" + document: { link, filename, caption }
+ *     currentRecipient, scheduled_time
  *   }
  *
  * Side effects on success:
@@ -86,12 +85,52 @@ function mimeToEndpoint(mimeType) {
   return "document";
 }
 
+/**
+ * Meta Cloud API requires lowercase `type` plus a sibling object, e.g.
+ * `{ type: "document", document: { link, filename } }` — not `type: "application/pdf"`.
+ */
+function buildWhatsAppMediaPayload(endpointType, mediaLink, filePath, caption) {
+  const cap = caption ?? "";
+  switch (endpointType) {
+    case "image":
+      return {
+        type: "image",
+        image: { link: mediaLink, ...(cap ? { caption: cap } : {}) },
+      };
+    case "video":
+      return {
+        type: "video",
+        video: { link: mediaLink, ...(cap ? { caption: cap } : {}) },
+      };
+    case "audio":
+      return { type: "audio", audio: { link: mediaLink } };
+    default:
+      return {
+        type: "document",
+        document: {
+          link: mediaLink,
+          filename: basename(filePath),
+          caption: cap,
+        },
+      };
+  }
+}
+
 function parseDateDDMMYYYY(str) {
   const match = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/);
   if (!match) return null;
   const [, dd, mm, yyyy, hh, min] = match;
   const d = new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:00`);
   return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+async function getUserId(config) {
+  const result = await requestJson(config, {
+    method: "GET",
+    path: "/api:-4GSCDHb/auth/me",
+  });
+  if (!result.ok) return null;
+  return result.data?.user_id ?? result.data?.id ?? null;
 }
 
 async function findRecipient(config, phone) {
@@ -107,8 +146,22 @@ async function findRecipient(config, phone) {
     return String(r.phone_number) === String(phone) ||
       String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
   });
-  if (!match) return { ok: false, error: `Recipient with phone ${phone} not found. They must have messaged you first.` };
-  return { ok: true, data: match.recipient ?? match };
+  if (match) return { ok: true, data: match.recipient ?? match };
+
+  const userId = await getUserId(config);
+  if (!userId) {
+    return { ok: false, error: `Recipient with phone ${phone} not found (web search empty; could not resolve user for chatapp lookup).` };
+  }
+  const chatResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/chatapp/recipient?phone_number=${encodeURIComponent(String(phone))}&user_id=${userId}`,
+  });
+  if (!chatResult.ok) return { ok: false, error: `Recipient with phone ${phone} not found. They must have messaged you first.` };
+  const raw = Array.isArray(chatResult.data) ? chatResult.data[0] : chatResult.data;
+  if (!raw || (Array.isArray(chatResult.data) && chatResult.data.length === 0)) {
+    return { ok: false, error: `Recipient with phone ${phone} not found. They must have messaged you first.` };
+  }
+  return { ok: true, data: raw };
 }
 
 async function uploadFile(filePath, mimeType) {
@@ -121,7 +174,7 @@ async function uploadFile(filePath, mimeType) {
   const blob = new Blob([fileBuffer], { type: mimeType });
   formData.append("file", blob, fileName);
 
-  const response = await fetch(`${baseUrl}/api:ox_LN9zX/upload_file_by_attachment`, {
+  const response = await fetch(`${baseUrl}/api:bVXsw_FD/upload_file_by_attachment`, {
     method: "POST",
     headers: { Authorization: token, Origin: CHAT_ORIGIN },
     body: formData,
@@ -133,6 +186,9 @@ async function uploadFile(filePath, mimeType) {
 
   if (!response.ok) {
     return { ok: false, error: `Upload failed (HTTP ${response.status})`, data };
+  }
+  if (data && data.success === false) {
+    return { ok: false, error: data.message || "Upload rejected by API", data };
   }
   return { ok: true, data };
 }
@@ -227,19 +283,28 @@ async function main() {
     return;
   }
 
-  const mediaLink = uploadResult.data?.url ?? uploadResult.data;
+  const mediaLink =
+    uploadResult.data?.file_url ??
+    uploadResult.data?.url ??
+    (typeof uploadResult.data === "string" ? uploadResult.data : null);
+  if (!mediaLink || typeof mediaLink !== "string") {
+    printJson(err("Upload succeeded but no file URL in response.", uploadResult.data));
+    return;
+  }
 
   if (pretty) {
     process.stderr.write(`  Uploaded URL: ${mediaLink}\n`);
     process.stderr.write(`  Sending via /web/send/${endpointType}...\n`);
   }
 
+  const waPayload = buildWhatsAppMediaPayload(endpointType, mediaLink, filePath, caption);
   const sendBody = {
     media_link: mediaLink,
-    type: mimeType,
+    mime_type: mimeType,
     caption,
     currentRecipient,
     scheduled_time: scheduledTime,
+    ...waPayload,
   };
 
   const sendResult = await sendMedia(config, endpointType, sendBody);
