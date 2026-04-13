@@ -62,6 +62,7 @@ node scripts/delete-template.js --id 987654321 --confirm    # whatsapp_template_
 Template names: lowercase, underscores only, cannot start with a digit.
 Status: `"approved"` (ready), `"PENDING"` (review), `"rejected"` (recreate with new name).
 After creating, poll `get-template.js --name <name>` to check status.
+**Note on deletion:** `delete-template.js` guards against deleting `REJECTED` templates — Meta removes them from their side, making the delete API call fail with a 400. The script detects this status upfront and exits with a clear error instead of hitting the API. Only `APPROVED` templates can be deleted.
 See `references/templates-reference.md` for full field reference.
 
 ### AI Bots

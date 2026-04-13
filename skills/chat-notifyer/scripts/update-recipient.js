@@ -72,12 +72,12 @@ async function findRecipient(config, phone) {
   if (!result.ok) return result;
   const items = Array.isArray(result.data) ? result.data : [];
   const match = items.find((row) => {
-    const r = row.recipient ?? row;
+    const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
     return String(r.phone_number) === String(phone) ||
       String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
   });
   if (!match) return { ok: false, error: `Recipient with phone ${phone} not found.` };
-  return { ok: true, data: match.recipient ?? match };
+  return { ok: true, data: (match.recipient && typeof match.recipient === "object") ? match.recipient : match };
 }
 
 async function main() {

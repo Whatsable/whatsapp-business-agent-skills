@@ -77,6 +77,61 @@ async function main() {
 
   const config = loadConfig({ requireToken: true });
 
+  // First, fetch the template to check its status
+  const listResult = await requestJson(config, {
+    method: "GET",
+    path: "/api:AFRA_QCy/templates_web",
+  });
+
+  if (!listResult.ok) {
+    printJson(err("Failed to fetch templates list", listResult.data, false));
+    return;
+  }
+
+  // API returns array directly in data field, not data.templates
+  const templates = Array.isArray(listResult.data) ? listResult.data : [];
+  const template = templates.find(t => t.whatsapp_template_id === Number(id));
+
+  if (!template) {
+    printJson(err(
+      `Template with whatsapp_template_id ${id} not found.`,
+      null,
+      false
+    ));
+    return;
+  }
+
+  // Check if template is REJECTED
+  if (template.status === "REJECTED") {
+    if (pretty) {
+      process.stderr.write(`\n⚠️  Cannot delete REJECTED template "${template.name}" (ID: ${id})\n\n`);
+      process.stderr.write(`  Why: Meta API returns 400 error for REJECTED templates because they\n`);
+      process.stderr.write(`       no longer exist on Meta's side. Notifyer's backend doesn't handle\n`);
+      process.stderr.write(`       this case and leaves the database record intact.\n\n`);
+      process.stderr.write(`  Options:\n`);
+      process.stderr.write(`    1. Contact Notifyer support to manually remove from database\n`);
+      process.stderr.write(`    2. Ignore it — REJECTED templates can't be used anyway\n\n`);
+      process.stderr.write(`  Note: Only APPROVED templates can be deleted through the API.\n\n`);
+    }
+    printJson(err(
+      `Cannot delete REJECTED template. Only APPROVED templates can be deleted. ` +
+      `Template "${template.name}" (ID: ${id}) was rejected by Meta and no longer exists ` +
+      `on Meta's side, so the API cannot process the deletion. Contact Notifyer support ` +
+      `to remove this record from the database.`,
+      { 
+        template_name: template.name,
+        whatsapp_template_id: template.whatsapp_template_id,
+        status: template.status,
+        category: template.category,
+        can_delete: false,
+        reason: "REJECTED templates cannot be deleted via API"
+      },
+      false
+    ));
+    return;
+  }
+
+  // Proceed with deletion for APPROVED templates
   const result = await requestJson(config, {
     method: "DELETE",
     path: "/api:AFRA_QCy/templates/delete",
@@ -96,12 +151,32 @@ async function main() {
     return;
   }
 
+  // Check if deletion actually succeeded (backend may return ok: true but success: false)
+  if (result.data && result.data.success === false) {
+    if (pretty) {
+      process.stderr.write(`\n❌ Template deletion failed\n\n`);
+      process.stderr.write(`  Template: ${template.name} (ID: ${id})\n`);
+      process.stderr.write(`  Status: ${template.status}\n`);
+      process.stderr.write(`  Error: ${result.data.result || "Unknown error"}\n\n`);
+      if (template.status === "REJECTED") {
+        process.stderr.write(`  Note: REJECTED templates cannot be deleted via API.\n\n`);
+      }
+    }
+    printJson(err(
+      `Template deletion failed: ${result.data.result || "Unknown error"}`,
+      result.data,
+      false
+    ));
+    return;
+  }
+
   if (pretty) {
-    process.stderr.write(`\nTemplate ${id} deleted successfully.\n`);
+    process.stderr.write(`\n✓ Template ${template.name} (ID: ${id}) deleted successfully!\n`);
+    process.stderr.write(`  Status: ${template.status}\n`);
     process.stderr.write(`  Note: Meta blocks reuse of this template name for 30 days.\n\n`);
   }
 
-  printJson(ok({ deleted: true, whatsapp_template_id: Number(id) }));
+  printJson(ok({ deleted: true, whatsapp_template_id: Number(id), template_name: template.name }));
 }
 
 main().catch((e) => {

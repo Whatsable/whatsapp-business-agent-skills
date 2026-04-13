@@ -49,6 +49,9 @@
 import { loadConfig, requestJson, AUTH_MODE_CHAT } from "./lib/notifyer-api.js";
 import { parseArgs, getFlag, getBooleanFlag } from "./lib/args.js";
 import { ok, err, printJson } from "./lib/result.js";
+import { validateScheduledSendResponse } from "./lib/schedule-response.js";
+
+const CHAT_ORIGIN = process.env.NOTIFYER_CHAT_ORIGIN ?? "https://chat.notifyer-systems.com";
 
 function parseDateDDMMYYYY(str) {
   const match = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/);
@@ -56,6 +59,94 @@ function parseDateDDMMYYYY(str) {
   const [, dd, mm, yyyy, hh, min] = match;
   const d = new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:00`);
   return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+async function getUserId(config) {
+  const result = await requestJson(config, {
+    method: "GET",
+    path: "/api:-4GSCDHb/auth/me",
+  });
+  if (!result.ok) return null;
+  return result.data?.user_id ?? result.data?.id ?? null;
+}
+
+async function checkMessageWindow(config, phone) {
+  // Try web/recipient first (has expiration_timestamp)
+  const parts = [
+    `page_number=0`,
+    `per_page=20`,
+    `search=${encodeURIComponent(String(phone))}`,
+    `labels=[]`,
+    `status=`,
+  ];
+  const webResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/web/recipient?${parts.join("&")}`,
+    extraHeaders: { Origin: CHAT_ORIGIN },
+  });
+  
+  if (webResult.ok) {
+    const items = Array.isArray(webResult.data) ? webResult.data : [];
+    const match = items.find((row) => {
+      const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
+      return String(r.phone_number) === String(phone) ||
+        String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
+    });
+    if (match) {
+      const recipient = (match.recipient && typeof match.recipient === "object") ? match.recipient : match;
+      const exp = recipient.expiration_timestamp;
+      const lastMsg = recipient.recipient_last_message_time;
+      const now = Date.now();
+      
+      // Calculate window status:
+      // 1. If expiration_timestamp exists, is not 0, and is in the future → window open
+      // 2. If recipient_last_message_time exists and < 24h ago → window open (fallback)
+      // 3. Otherwise → window closed
+      
+      let windowOpen = false;
+      if (exp != null && exp !== 0 && exp > now) {
+        windowOpen = true;
+      } else if (lastMsg && lastMsg > 0) {
+        const hours24 = 24 * 60 * 60 * 1000;
+        const timeSinceLastMsg = now - lastMsg;
+        windowOpen = timeSinceLastMsg < hours24;
+      }
+      
+      return {
+        found: true,
+        windowOpen: windowOpen,
+        expiration: exp,
+        lastMessage: lastMsg,
+        name: recipient.name,
+      };
+    }
+  }
+  
+  // Fallback to chatapp/recipient (doesn't have expiration_timestamp, so we can't check)
+  const userId = await getUserId(config);
+  if (!userId) {
+    return { found: false };
+  }
+  
+  const chatResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/chatapp/recipient?phone_number=${phone}&user_id=${userId}`,
+  });
+  
+  if (chatResult.ok) {
+    const data = Array.isArray(chatResult.data) ? chatResult.data[0] : chatResult.data;
+    if (data && !(Array.isArray(chatResult.data) && chatResult.data.length === 0)) {
+      // Found via chatapp but can't determine window status
+      return {
+        found: true,
+        windowOpen: null, // unknown
+        expiration: null,
+        name: data.name,
+      };
+    }
+  }
+  
+  return { found: false };
 }
 
 async function main() {
@@ -91,6 +182,33 @@ async function main() {
 
   const config = loadConfig({ authMode: AUTH_MODE_CHAT, requireToken: true });
 
+  // Check 24-hour messaging window (only for immediate sends)
+  if (!scheduledTime) {
+    const windowCheck = await checkMessageWindow(config, phone);
+    
+    if (!windowCheck.found) {
+      printJson(err(`Recipient with phone ${phone} not found. They may not have contacted you yet.`));
+      return;
+    }
+    
+    if (windowCheck.windowOpen === false) {
+      const name = windowCheck.name ?? `+${phone}`;
+      printJson(err(
+        `24-hour messaging window is CLOSED for ${name}. ` +
+        `WhatsApp only allows free-text messages within 24 hours of the recipient's last message. ` +
+        `\n\nOptions:\n` +
+        `  1. Use a template message: node scripts/send-template.js --phone ${phone} --template <name>\n` +
+        `  2. Wait for the contact to message you first\n` +
+        `  3. Schedule this message for later: node scripts/send-text.js --phone ${phone} --text "${text}" --schedule "DD/MM/YYYY HH:mm"`
+      ));
+      return;
+    }
+    
+    if (windowCheck.windowOpen === null && pretty) {
+      process.stderr.write(`\n⚠️  Warning: Could not verify 24-hour window status. Message may fail if window is closed.\n\n`);
+    }
+  }
+
   const body = {
     text,
     phone_number: phone,
@@ -108,17 +226,25 @@ async function main() {
     return;
   }
 
+  const d = result.data;
+  if (scheduledTime !== undefined) {
+    const schedCheck = validateScheduledSendResponse(d);
+    if (!schedCheck.ok) {
+      printJson(err(schedCheck.message, d, false));
+      return;
+    }
+  }
+
   if (pretty) {
     if (scheduledTime) {
       process.stderr.write(`\nMessage scheduled for ${scheduleStr} (${scheduledTime}ms)\n`);
       process.stderr.write(`  To: +${phone}\n`);
       process.stderr.write(`  Text: "${text}"\n\n`);
     } else {
-      const d = result.data;
       process.stderr.write(`\nMessage sent!\n`);
       process.stderr.write(`  To: +${phone}\n`);
       process.stderr.write(`  Text: "${text}"\n`);
-      process.stderr.write(`  Success: ${d?.success ?? "unknown"}\n\n`);
+      process.stderr.write(`  Success: ${result.data?.success ?? "unknown"}\n\n`);
     }
   }
 

@@ -382,18 +382,24 @@ node scripts/update-recipient.js --phone 14155550123 --name "John Doe"
 # Check 24h window first:
 node scripts/get-recipient.js --phone 14155550123 --pretty
 
-# Send text (window open):
+# Send text (window open) — script auto-checks the 24h window and refuses if closed:
 node scripts/send-text.js --phone 14155550123 --text "Hello! How can I help?"
 
-# Send template (works even if window closed):
-node scripts/send-template.js --phone 14155550123 --template tmpl_abc123 \
+# Send template (works even if window closed) — use --name (easiest) or --template:
+node scripts/send-template.js --phone 14155550123 --name order_confirm \
   --variables '{"body1":"John","body2":"#12345"}'
+
+# List available templates to find the right name:
+node scripts/send-template.js --list
+
+# Preview a template send without sending (--dry-run):
+node scripts/send-template.js --phone 14155550123 --name order_confirm --dry-run
 
 # Send attachment:
 node scripts/send-attachment.js --phone 14155550123 --file ./invoice.pdf --pretty
 ```
 
-> **24h Window Rule:** WhatsApp only allows free-text and attachment messages within 24 hours of the recipient's last inbound message. When the window is closed, use `send-template.js`.
+> **24h Window Rule:** WhatsApp only allows free-text and attachment messages within 24 hours of the recipient's last inbound message. `send-text.js` enforces this automatically and exits with a clear error if the window is closed. Use `send-template.js` when the window is closed.
 
 ### Labels
 

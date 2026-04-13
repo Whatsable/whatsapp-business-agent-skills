@@ -56,6 +56,66 @@ import { ok, err, printJson } from "./lib/result.js";
 
 const CHAT_ORIGIN = process.env.NOTIFYER_CHAT_ORIGIN ?? "https://chat.notifyer-systems.com";
 
+async function getUserId(config) {
+  const result = await requestJson(config, { method: "GET", path: "/api:-4GSCDHb/auth/me" });
+  if (!result.ok) return null;
+  return result.data?.user_id ?? result.data?.id ?? null;
+}
+
+async function findRecipient(config, phone) {
+  const parts = [
+    `page_number=0`,
+    `per_page=20`,
+    `search=${encodeURIComponent(phone)}`,
+    `labels=[]`,
+    `status=`,
+  ];
+  const result = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/web/recipient?${parts.join("&")}`,
+    extraHeaders: { Origin: CHAT_ORIGIN },
+  });
+  if (!result.ok) return result;
+  const items = Array.isArray(result.data) ? result.data : [];
+  const match = items.find((row) => {
+    const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
+    return String(r.phone_number) === String(phone) ||
+      String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
+  });
+  if (match) return { ok: true, data: (match.recipient && typeof match.recipient === "object") ? match.recipient : match };
+
+  // Fallback: chatapp/recipient (doesn't carry note_auto, so after finding the ID
+  // we re-fetch from web/recipient by ID to get the full record including note_auto).
+  const userId = await getUserId(config);
+  if (!userId) return { ok: false, error: `Recipient with phone ${phone} not found (web search empty; could not resolve user for chatapp lookup).` };
+  const chatResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/chatapp/recipient?phone_number=${encodeURIComponent(phone)}&user_id=${userId}`,
+  });
+  if (!chatResult.ok) return { ok: false, error: `Recipient with phone ${phone} not found.` };
+  const raw = Array.isArray(chatResult.data) ? chatResult.data[0] : chatResult.data;
+  if (!raw || (Array.isArray(chatResult.data) && chatResult.data.length === 0)) {
+    return { ok: false, error: `Recipient with phone ${phone} not found.` };
+  }
+  // Re-fetch via web endpoint by ID to get note_auto and other full-record fields.
+  if (raw.id) {
+    const webById = await requestJson(config, {
+      method: "GET",
+      path: `/api:bVXsw_FD/web/recipient?page_number=0&per_page=20&search=${encodeURIComponent(phone)}&labels=[]&status=`,
+      extraHeaders: { Origin: CHAT_ORIGIN },
+    });
+    if (webById.ok) {
+      const webItems = Array.isArray(webById.data) ? webById.data : [];
+      const webMatch = webItems.find((row) => {
+        const r2 = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
+        return r2.id === raw.id;
+      });
+      if (webMatch) return { ok: true, data: (webMatch.recipient && typeof webMatch.recipient === "object") ? webMatch.recipient : webMatch };
+    }
+  }
+  return { ok: true, data: raw };
+}
+
 async function main() {
   const flags = parseArgs();
   const phoneRaw = getFlag(flags, "phone");
@@ -70,38 +130,13 @@ async function main() {
 
   const config = loadConfig({ authMode: AUTH_MODE_CHAT, requireToken: true });
 
-  const parts = [
-    `page_number=0`,
-    `per_page=20`,
-    `search=${encodeURIComponent(phone)}`,
-    `labels=[]`,
-    `status=`,
-  ];
-
-  const result = await requestJson(config, {
-    method: "GET",
-    path: `/api:bVXsw_FD/web/recipient?${parts.join("&")}`,
-    extraHeaders: { Origin: CHAT_ORIGIN },
-  });
-
-  if (!result.ok) {
-    printJson(err(result.error, result.data, false, result.status));
+  const findResult = await findRecipient(config, phone);
+  if (!findResult.ok) {
+    printJson(err(findResult.error, findResult.data, false, findResult.status));
     return;
   }
 
-  const items = Array.isArray(result.data) ? result.data : [];
-  const match = items.find((row) => {
-    const r = row.recipient ?? row;
-    return String(r.phone_number) === String(phone) ||
-      String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
-  });
-
-  if (!match) {
-    printJson(err(`Recipient with phone ${phone} not found.`, null, false));
-    return;
-  }
-
-  const r = match.recipient ?? match;
+  const r = findResult.data;
   const manualNote = r.note ?? "";
   const aiNote = r.note_auto ?? "";
 

@@ -8,6 +8,11 @@
  * send-attachment.js with the --schedule flag. They are sent automatically
  * at the scheduled_time by the Xano backend.
  *
+ * Limitation: On some stacks GET /web/scheduled_messages returns [] even when
+ * the queue works, or template schedule may not queue at all (send-* scripts
+ * validate schedule acks — see lib/schedule-response.js). Confirm in Notifyer
+ * UI if this endpoint is empty but you expect rows.
+ *
  * Usage:
  *   node scripts/list-scheduled.js --phone 14155550123
  *   node scripts/list-scheduled.js --pretty

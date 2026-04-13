@@ -7,6 +7,9 @@
  * Thin wrapper around list-recipients.js with --labels required.
  * Labels are the global_label names created in setup-notifyer (create-label.js).
  *
+ * IMPORTANT: Label matching is CASE-SENSITIVE by default. If the API returns 0 results,
+ * the script will automatically retry with case-insensitive client-side filtering.
+ *
  * Usage:
  *   node scripts/filter-recipients-by-label.js --labels "Support"
  *   node scripts/filter-recipients-by-label.js --labels "Support,Billing"
@@ -15,7 +18,7 @@
  *
  * Flags:
  *   --labels <csv>      Required. Label names to filter by, comma-separated.
- *                       Must match labels created via setup-notifyer/create-label.js.
+ *                       Matching is case-sensitive; script falls back to case-insensitive if no exact matches.
  *   --status unread     Only return unread conversations.
  *   --page <n>          Page number, 1-based (default: 1).
  *   --per-page <n>      Results per page (default: 20).
@@ -70,6 +73,33 @@ async function fetchPage(config, params) {
   });
 }
 
+/**
+ * Client-side case-insensitive label filter fallback.
+ * Used when the API returns 0 results with exact case match.
+ */
+function filterByCaseInsensitiveLabels(recipients, searchLabels, statusFilter = "") {
+  const searchLower = searchLabels.map(l => l.toLowerCase());
+  return recipients.filter(row => {
+    const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
+    
+    // Check labels (case-insensitive)
+    const recipientLabels = Array.isArray(r.global_label) 
+      ? r.global_label 
+      : (typeof r.global_label === "string" ? JSON.parse(r.global_label || "[]") : []);
+    const recipientLower = recipientLabels.map(l => String(l).toLowerCase());
+    const hasMatchingLabel = searchLower.some(label => recipientLower.includes(label));
+    
+    if (!hasMatchingLabel) return false;
+    
+    // Apply status filter if specified
+    if (statusFilter === "unread") {
+      return r.read_time == null || r.read_time === 0;
+    }
+    
+    return true;
+  });
+}
+
 async function main() {
   const flags = parseArgs();
   const labelsRaw = getFlag(flags, "labels");
@@ -109,10 +139,35 @@ async function main() {
       currentPage++;
     }
 
-    if (pretty) {
-      process.stderr.write(`\nRecipients with label(s) [${labels.join(", ")}]: ${allRecipients.length} total\n\n`);
+    // If no results with exact case match, try case-insensitive fallback
+    let finalRecipients = allRecipients;
+    let usedFallback = false;
+    if (allRecipients.length === 0) {
+      // Fetch all recipients without label filter and do client-side case-insensitive matching
+      const allResult = await requestJson(config, {
+        method: "GET",
+        path: `/api:bVXsw_FD/web/recipient?page_number=0&per_page=100&search=&labels=[]&status=`,
+        extraHeaders: { Origin: CHAT_ORIGIN },
+      });
+      if (allResult.ok) {
+        const allItems = Array.isArray(allResult.data) ? allResult.data : [];
+        finalRecipients = filterByCaseInsensitiveLabels(allItems, labels, status);
+        usedFallback = finalRecipients.length > 0;
+      }
     }
-    printJson(ok({ labels, recipients: allRecipients, count: allRecipients.length, page: "all", has_more: false }));
+
+    if (pretty) {
+      if (usedFallback) {
+        process.stderr.write(`\n⚠ No exact case match for [${labels.join(", ")}]. Using case-insensitive fallback.\n`);
+      }
+      if (finalRecipients.length === 0) {
+        process.stderr.write(`\n⚠ No recipients found with label(s) [${labels.join(", ")}].\n`);
+        process.stderr.write(`   Label matching is case-sensitive. Check that labels exist with: node scripts/list-labels.js\n\n`);
+      } else {
+        process.stderr.write(`\nRecipients with label(s) [${labels.join(", ")}]: ${finalRecipients.length} total\n\n`);
+      }
+    }
+    printJson(ok({ labels, recipients: finalRecipients, count: finalRecipients.length, page: "all", has_more: false, used_case_insensitive_fallback: usedFallback }));
   } else {
     const result = await fetchPage(config, { page_number: page - 1, per_page: perPage, labels, status });
 
@@ -121,18 +176,42 @@ async function main() {
       return;
     }
 
-    const items = Array.isArray(result.data) ? result.data : [];
+    let items = Array.isArray(result.data) ? result.data : [];
+    let usedFallback = false;
 
-    if (pretty) {
-      process.stderr.write(`\nRecipients with label(s) [${labels.join(", ")}]: ${items.length} on page ${page}\n\n`);
-      for (const row of items) {
-        const r = row.recipient;
-        process.stderr.write(`  [${r.id}] ${r.name ?? "Unknown"} — ${r.phone_number_string ?? r.phone_number} — ${(r.global_label ?? []).join(",")}\n`);
+    // If no results with exact case match, try case-insensitive fallback
+    if (items.length === 0) {
+      const allResult = await requestJson(config, {
+        method: "GET",
+        path: `/api:bVXsw_FD/web/recipient?page_number=${page - 1}&per_page=${perPage}&search=&labels=[]&status=`,
+        extraHeaders: { Origin: CHAT_ORIGIN },
+      });
+      if (allResult.ok) {
+        const allItems = Array.isArray(allResult.data) ? allResult.data : [];
+        items = filterByCaseInsensitiveLabels(allItems, labels, status);
+        usedFallback = items.length > 0;
       }
-      process.stderr.write("\n");
     }
 
-    printJson(ok({ labels, recipients: items, count: items.length, page, has_more: items.length === perPage }));
+    if (pretty) {
+      if (usedFallback) {
+        process.stderr.write(`\n⚠ No exact case match for [${labels.join(", ")}]. Using case-insensitive fallback.\n`);
+      }
+      if (items.length === 0) {
+        process.stderr.write(`\n⚠ No recipients found with label(s) [${labels.join(", ")}] on page ${page}.\n`);
+        process.stderr.write(`   Label matching is case-sensitive. Check that labels exist with: node scripts/list-labels.js\n\n`);
+      } else {
+        process.stderr.write(`\nRecipients with label(s) [${labels.join(", ")}]: ${items.length} on page ${page}\n\n`);
+        for (const row of items) {
+          const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
+          const recipientLabels = Array.isArray(r.global_label) ? r.global_label : [];
+          process.stderr.write(`  [${r.id}] ${r.name ?? "Unknown"} — ${r.phone_number_string ?? r.phone_number} — ${recipientLabels.join(",")}\n`);
+        }
+        process.stderr.write("\n");
+      }
+    }
+
+    printJson(ok({ labels, recipients: items, count: items.length, page, has_more: items.length === perPage, used_case_insensitive_fallback: usedFallback }));
   }
 }
 

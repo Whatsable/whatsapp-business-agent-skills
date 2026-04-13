@@ -58,6 +58,15 @@ import { ok, err, printJson } from "./lib/result.js";
 
 const CHAT_ORIGIN = process.env.NOTIFYER_CHAT_ORIGIN ?? "https://chat.notifyer-systems.com";
 
+async function getUserId(config) {
+  const result = await requestJson(config, {
+    method: "GET",
+    path: "/api:-4GSCDHb/auth/me",
+  });
+  if (!result.ok) return null;
+  return result.data?.user_id ?? result.data?.id ?? null;
+}
+
 async function findRecipient(config, phone) {
   const parts = [
     `page_number=0`,
@@ -74,12 +83,26 @@ async function findRecipient(config, phone) {
   if (!result.ok) return result;
   const items = Array.isArray(result.data) ? result.data : [];
   const match = items.find((row) => {
-    const r = row.recipient ?? row;
+    const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
     return String(r.phone_number) === String(phone) ||
       String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
   });
-  if (!match) return { ok: false, error: `Recipient with phone ${phone} not found.` };
-  return { ok: true, data: match.recipient ?? match };
+  if (match) return { ok: true, data: (match.recipient && typeof match.recipient === "object") ? match.recipient : match };
+
+  const userId = await getUserId(config);
+  if (!userId) {
+    return { ok: false, error: `Recipient with phone ${phone} not found (web search empty; could not resolve user for chatapp lookup).` };
+  }
+  const chatResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/chatapp/recipient?phone_number=${encodeURIComponent(String(phone))}&user_id=${userId}`,
+  });
+  if (!chatResult.ok) return { ok: false, error: `Recipient with phone ${phone} not found.` };
+  const raw = Array.isArray(chatResult.data) ? chatResult.data[0] : chatResult.data;
+  if (!raw || (Array.isArray(chatResult.data) && chatResult.data.length === 0)) {
+    return { ok: false, error: `Recipient with phone ${phone} not found.` };
+  }
+  return { ok: true, data: raw };
 }
 
 async function main() {
@@ -132,7 +155,14 @@ async function main() {
   const patchResult = await requestJson(config, {
     method: "PATCH",
     path: `/api:bVXsw_FD/web/recipient/${recipient.id}`,
-    body: { note: newNote },
+    body: {
+      name: recipient.name ?? "",
+      phone_number: recipient.phone_number,
+      phone_number_string: recipient.phone_number_string ?? String(recipient.phone_number ?? phone),
+      global_label: Array.isArray(recipient.global_label) ? recipient.global_label : [],
+      is_ai_assistant: typeof recipient.is_ai_assistant === "boolean" ? recipient.is_ai_assistant : false,
+      note: newNote,
+    },
     extraHeaders: { Origin: CHAT_ORIGIN },
   });
 

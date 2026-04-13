@@ -2,10 +2,11 @@
 /**
  * get-recipient.js — Get a single recipient by phone number.
  *
- * GET /api:bVXsw_FD/chatapp/recipient?phone_number=<int>&user_id=<uuid>
- *
- * Strategy: calls GET /auth/me first to get the user_id (uuid) required
- * by this endpoint, then fetches the recipient.
+ * Strategy:
+ *   1. Try GET /api:bVXsw_FD/web/recipient?search=<phone>
+ *      (returns full record with global_label, note, note_auto, ai_bot_id, etc.)
+ *   2. If not found, fallback to GET /api:bVXsw_FD/chatapp/recipient
+ *      (returns partial record, but at least confirms the contact exists)
  *
  * Usage:
  *   node scripts/get-recipient.js --phone 14155550123
@@ -39,17 +40,20 @@
  *   - null or past → template-only contact (use send-template.js)
  *   - future → open window (can use send-text.js)
  *
- * Endpoint: PUBLIC in Xano (no auth badge) but sends Authorization header anyway.
- * No CORS header required for /chatapp/ endpoints.
+ * Auth: Authorization: <token> (raw JWT, no Bearer — chat auth mode).
+ * CORS: /web/recipient requires Origin: https://chat.notifyer-systems.com.
  *
  * Environment:
  *   NOTIFYER_API_BASE_URL    required
  *   NOTIFYER_API_TOKEN       required (from setup-notifyer/login.js)
+ *   NOTIFYER_CHAT_ORIGIN     optional (default: https://chat.notifyer-systems.com)
  */
 
 import { loadConfig, requestJson, AUTH_MODE_CHAT } from "./lib/notifyer-api.js";
 import { parseArgs, getFlag, getBooleanFlag } from "./lib/args.js";
 import { ok, err, printJson } from "./lib/result.js";
+
+const CHAT_ORIGIN = process.env.NOTIFYER_CHAT_ORIGIN ?? "https://chat.notifyer-systems.com";
 
 async function getUserId(config) {
   const result = await requestJson(config, {
@@ -58,6 +62,57 @@ async function getUserId(config) {
   });
   if (!result.ok) return null;
   return result.data?.user_id ?? result.data?.id ?? null;
+}
+
+async function findRecipient(config, phone) {
+  // Try web/recipient first (has full fields including labels, notes, bot_id)
+  const parts = [
+    `page_number=0`,
+    `per_page=20`,
+    `search=${encodeURIComponent(String(phone))}`,
+    `labels=[]`,
+    `status=`,
+  ];
+  const webResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/web/recipient?${parts.join("&")}`,
+    extraHeaders: { Origin: CHAT_ORIGIN },
+  });
+  
+  if (webResult.ok) {
+    const items = Array.isArray(webResult.data) ? webResult.data : [];
+    const match = items.find((row) => {
+      const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
+      return String(r.phone_number) === String(phone) ||
+        String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
+    });
+    if (match) {
+      const recipient = (match.recipient && typeof match.recipient === "object") ? match.recipient : match;
+      return { ok: true, data: recipient };
+    }
+  }
+  
+  // Fallback to chatapp/recipient (partial fields)
+  const userId = await getUserId(config);
+  if (!userId) {
+    return { ok: false, error: `Recipient with phone ${phone} not found.` };
+  }
+  
+  const chatResult = await requestJson(config, {
+    method: "GET",
+    path: `/api:bVXsw_FD/chatapp/recipient?phone_number=${phone}&user_id=${userId}`,
+  });
+  
+  if (!chatResult.ok) {
+    return { ok: false, error: `Recipient with phone ${phone} not found.` };
+  }
+  
+  const data = Array.isArray(chatResult.data) ? chatResult.data[0] : chatResult.data;
+  if (!data || (Array.isArray(chatResult.data) && chatResult.data.length === 0)) {
+    return { ok: false, error: `Recipient with phone ${phone} not found.` };
+  }
+  
+  return { ok: true, data };
 }
 
 async function main() {
@@ -70,45 +125,53 @@ async function main() {
     return;
   }
 
-  const phone = parseInt(phoneRaw.replace(/^\+/, ""), 10);
-  if (isNaN(phone)) {
-    printJson(err("--phone must be a valid integer phone number (no + prefix)."));
-    return;
-  }
+  const phone = phoneRaw.replace(/^\+/, "");
 
   const config = loadConfig({ authMode: AUTH_MODE_CHAT, requireToken: true });
 
-  const userId = await getUserId(config);
-  if (!userId) {
-    printJson(err("Could not resolve user_id from auth token. Ensure NOTIFYER_API_TOKEN is valid."));
+  const findResult = await findRecipient(config, phone);
+  if (!findResult.ok) {
+    printJson(err(findResult.error));
     return;
   }
 
-  const result = await requestJson(config, {
-    method: "GET",
-    path: `/api:bVXsw_FD/chatapp/recipient?phone_number=${phone}&user_id=${userId}`,
-  });
-
-  if (!result.ok) {
-    printJson(err(result.error, result.data, false, result.status));
-    return;
-  }
-
-  const data = Array.isArray(result.data) ? result.data[0] : result.data;
-
-  if (!data || (Array.isArray(result.data) && result.data.length === 0)) {
-    printJson(err(`Recipient with phone ${phone} not found.`, null, false));
-    return;
-  }
+  const data = findResult.data;
 
   if (pretty) {
     const now = Date.now();
     const exp = data.expiration_timestamp;
-    const windowOpen = exp && exp > now;
+    
+    // Determine if 24-hour window is open
+    let windowOpen = false;
+    if (exp && exp !== 0 && exp > now) {
+      // expiration_timestamp is set and valid
+      windowOpen = true;
+    } else if (exp === 0 || exp === null) {
+      // No expiration_timestamp, fall back to recipient_last_message_time
+      const lastMsg = data.recipient_last_message_time;
+      if (lastMsg) {
+        const hoursSince = (now - lastMsg) / 1000 / 60 / 60;
+        windowOpen = hoursSince < 24;
+      }
+    }
+    
+    // Parse labels (can be array or JSON string)
+    let labels = [];
+    if (Array.isArray(data.global_label)) {
+      labels = data.global_label;
+    } else if (typeof data.global_label === "string" && data.global_label.trim()) {
+      try {
+        const parsed = JSON.parse(data.global_label);
+        labels = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        labels = [];
+      }
+    }
+    
     process.stderr.write(`\nRecipient: ${data.name ?? "Unknown"}\n`);
     process.stderr.write(`  ID:              ${data.id}\n`);
     process.stderr.write(`  Phone:           ${data.phone_number_string ?? data.phone_number}\n`);
-    process.stderr.write(`  Labels:          ${(data.global_label ?? []).join(", ") || "None"}\n`);
+    process.stderr.write(`  Labels:          ${labels.join(", ") || "None"}\n`);
     process.stderr.write(`  Note:            ${data.note || "(none)"}\n`);
     process.stderr.write(`  AI Note:         ${data.note_auto || "(none)"}\n`);
     process.stderr.write(`  AI Assistant:    ${data.is_ai_assistant ? "Yes (Bot)" : "No (Human)"}\n`);

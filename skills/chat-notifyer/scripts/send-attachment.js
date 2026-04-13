@@ -63,6 +63,7 @@ import { basename, extname } from "path";
 import { loadConfig, requestJson, AUTH_MODE_CHAT } from "./lib/notifyer-api.js";
 import { parseArgs, getFlag, getBooleanFlag } from "./lib/args.js";
 import { ok, err, printJson } from "./lib/result.js";
+import { validateScheduledSendResponse } from "./lib/schedule-response.js";
 
 const CHAT_ORIGIN = process.env.NOTIFYER_CHAT_ORIGIN ?? "https://chat.notifyer-systems.com";
 
@@ -142,11 +143,11 @@ async function findRecipient(config, phone) {
   if (!result.ok) return result;
   const items = Array.isArray(result.data) ? result.data : [];
   const match = items.find((row) => {
-    const r = row.recipient ?? row;
+    const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
     return String(r.phone_number) === String(phone) ||
       String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
   });
-  if (match) return { ok: true, data: match.recipient ?? match };
+  if (match) return { ok: true, data: (match.recipient && typeof match.recipient === "object") ? match.recipient : match };
 
   const userId = await getUserId(config);
   if (!userId) {
@@ -317,6 +318,14 @@ async function main() {
   if (d?.success === false) {
     printJson(err(d.message || "Media send failed (API returned success: false)", d, false));
     return;
+  }
+
+  if (scheduledTime) {
+    const schedCheck = validateScheduledSendResponse(d);
+    if (!schedCheck.ok) {
+      printJson(err(schedCheck.message, d, false));
+      return;
+    }
   }
 
   if (pretty) {

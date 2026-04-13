@@ -136,6 +136,8 @@ node scripts/get-recipient.js --phone 14155550123 --pretty
 node scripts/filter-recipients-by-label.js --labels "Support" --status unread --pretty
 ```
 
+Label matching is case-sensitive. If the API returns 0 results, the script automatically retries with case-insensitive client-side filtering and flags `used_case_insensitive_fallback: true` in the output.
+
 ### Fetch all recipients across all pages
 
 ```bash
@@ -148,19 +150,24 @@ node scripts/list-recipients.js --all --pretty
 node scripts/send-text.js --phone 14155550123 --text "Hello! How can I help?"
 ```
 
-**Note:** Only works when the 24h window is open.
+`send-text.js` automatically checks the 24h messaging window before sending. If the window is closed it exits with `ok: false` and a clear message explaining the options (use a template, or wait for the contact to message first). No manual pre-check with `get-recipient.js` is needed.
 
 ### Send a template message (works any time)
 
 ```bash
-# First, get your template IDs:
-node ../automate-notifyer/scripts/list-templates.js --pretty
-
-# Send with variables:
-node scripts/send-template.js \
-  --phone 14155550123 \
-  --template tmpl_abc123 \
+# By template name (recommended — easier than looking up the ID):
+node scripts/send-template.js --phone 14155550123 --name order_confirm
+node scripts/send-template.js --phone 14155550123 --name order_confirm \
   --variables '{"body1":"John","body2":"#12345"}'
+
+# List all available templates:
+node scripts/send-template.js --list
+
+# Preview what would be sent without actually sending:
+node scripts/send-template.js --phone 14155550123 --name order_confirm --dry-run
+
+# By template ID (legacy):
+node scripts/send-template.js --phone 14155550123 --template tmpl_abc123
 ```
 
 ### Send a file (image, PDF, video, audio)
@@ -289,7 +296,7 @@ node scripts/add-note.js --phone 14155550123 --note ""   # clear note
 
 2. **Phone numbers**: Always send as integer (no `+` prefix). Parse with `parseInt(phone.replace(/^\+/, ""), 10)`.
 
-3. **24h window**: Check `expiration_timestamp` before sending text or attachment. If window closed, use template only.
+3. **24h window**: `send-text.js` auto-checks the window and refuses to send if it is closed — no pre-check needed. For attachments, check `expiration_timestamp` via `get-recipient.js`. If window closed, use `send-template.js`.
 
 4. **Fetch before patch**: For label changes, note changes, and bot assignment — always fetch the recipient first to get current state, then PATCH with the full intended state.
 
@@ -314,8 +321,8 @@ node scripts/add-note.js --phone 14155550123 --note ""   # clear note
 | `scripts/list-recipients.js` | List/search conversation recipients with pagination | Chat |
 | `scripts/get-recipient.js` | Get single recipient by phone number | Chat |
 | `scripts/filter-recipients-by-label.js` | List recipients filtered by label(s) | Chat |
-| `scripts/send-text.js` | Send a free-text message (24h window required) | Chat |
-| `scripts/send-template.js` | Send a template message (no window required) | Chat |
+| `scripts/send-text.js` | Send a free-text message (auto-checks 24h window; refuses if closed) | Chat |
+| `scripts/send-template.js` | Send a template message (no window required; supports `--name`, `--list`, `--dry-run`) | Chat |
 | `scripts/send-attachment.js` | Upload file then send as image/video/audio/document (auto-detects type) | Chat |
 | `scripts/assign-label.js` | Assign a label to a recipient | Chat |
 | `scripts/remove-label.js` | Remove a label from a recipient | Chat |
@@ -337,6 +344,7 @@ node scripts/add-note.js --phone 14155550123 --note ""   # clear note
 | `lib/notifyer-api.js` | `loadConfig`, `requestJson`, `AUTH_MODE_CHAT`, `AUTH_MODE_CONSOLE` |
 | `lib/args.js` | `parseArgs`, `getFlag`, `getBooleanFlag`, `getNumberFlag` |
 | `lib/result.js` | `ok`, `err`, `printJson` — standardised JSON output |
+| `lib/schedule-response.js` | `validateScheduledSendResponse` — detects silent schedule failures (`status: not_passed`, `id: null`) |
 
 ---
 

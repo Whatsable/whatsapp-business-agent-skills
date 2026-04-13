@@ -78,11 +78,11 @@ async function findRecipient(config, phone) {
   if (!result.ok) return result;
   const items = Array.isArray(result.data) ? result.data : [];
   const match = items.find((row) => {
-    const r = row.recipient ?? row;
+    const r = (row.recipient && typeof row.recipient === "object") ? row.recipient : row;
     return String(r.phone_number) === String(phone) ||
       String(r.phone_number_string ?? "").replace(/\D/g, "") === String(phone).replace(/\D/g, "");
   });
-  if (match) return { ok: true, data: match.recipient ?? match };
+  if (match) return { ok: true, data: (match.recipient && typeof match.recipient === "object") ? match.recipient : match };
 
   const userId = await getUserId(config);
   if (!userId) {
@@ -105,12 +105,26 @@ function buildBotPatchBody(recipient, botId, enableAi) {
   if (phoneNum == null || phoneNum === "") {
     return { ok: false, error: "Recipient record is missing phone_number; cannot patch safely." };
   }
+  
+  // Parse global_label: can be array, JSON string, or missing
+  let labels = [];
+  if (Array.isArray(recipient.global_label)) {
+    labels = recipient.global_label;
+  } else if (typeof recipient.global_label === "string" && recipient.global_label.trim()) {
+    try {
+      const parsed = JSON.parse(recipient.global_label);
+      labels = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      labels = [];
+    }
+  }
+  
   const body = {
     name: recipient.name ?? "",
     phone_number: phoneNum,
     phone_number_string: recipient.phone_number_string ?? String(phoneNum),
     note: recipient.note ?? "",
-    global_label: Array.isArray(recipient.global_label) ? recipient.global_label : [],
+    global_label: labels,
     ai_bot_id: botId,
   };
   if (enableAi) body.is_ai_assistant = true;

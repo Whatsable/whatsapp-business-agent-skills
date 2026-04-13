@@ -90,21 +90,58 @@ import { ok, err, printJson } from "./lib/result.js";
 
 const CHAT_ORIGIN = process.env.NOTIFYER_CHAT_ORIGIN ?? "https://chat.notifyer-systems.com";
 
+function extractInboundText(msg) {
+  // Fast path: recipient field holds the plain text body for inbound text messages.
+  if (msg.recipient && typeof msg.recipient === "string" && msg.recipient.trim()) {
+    return msg.recipient;
+  }
+  // Deep path: extract from Meta webhook payload for richer types.
+  try {
+    const messages = msg.recipient_payload?.entry?.[0]?.changes?.[0]?.value?.messages;
+    if (Array.isArray(messages) && messages.length > 0) {
+      const m = messages[0];
+      if (m.text?.body) return m.text.body;
+      if (m.button?.text) return m.button.text;
+      if (m.interactive?.button_reply?.title) return m.interactive.button_reply.title;
+      if (m.interactive?.list_reply?.title) return m.interactive.list_reply.title;
+    }
+  } catch (_) {}
+  return null;
+}
+
 function normaliseMessage(msg) {
-  const ts = msg.timestamp ?? msg.created_at ?? null;
+  const ts = msg.created_at ?? msg.timestamp ?? null;
   const tsMs = ts ? Number(ts) : null;
 
-  const direction =
-    msg.direction ?? (msg.incoming === true ? "inbound" : msg.incoming === false ? "outbound" : null);
+  // direction: "webhook" = message came FROM the contact (inbound).
+  // All other channels (chat, chat_template, broadcast, zapier_*, chat_schedule, etc.)
+  // are messages sent BY the team/automation (outbound).
+  const INBOUND_CHANNELS = new Set(["webhook"]);
+  const isInbound = INBOUND_CHANNELS.has(msg.channel) || (msg.channel == null && msg.send_by === "" && !msg.system_user);
+  const direction = msg.direction ?? (isInbound ? "inbound" : "outbound");
+
+  // For outbound messages the body is in system_user.
+  // For inbound messages the body is in recipient or nested in recipient_payload.
+  const text = isInbound
+    ? extractInboundText(msg)
+    : (typeof msg.system_user === "string" && msg.system_user.trim() ? msg.system_user : null);
+
+  const type = msg.type ?? msg.message_type ?? "text";
+
+  // Template name is inside system_user_payload for outbound templates.
+  const templateName = msg.template_name
+    ?? msg.system_user_payload?.template?.name
+    ?? null;
 
   return {
     id: msg.id,
     direction,
-    type: msg.type ?? msg.message_type ?? "text",
-    text: msg.text ?? msg.body ?? null,
-    media_link: msg.media_link ?? msg.url ?? null,
+    type,
+    text,
+    media_link: msg.media_url ?? msg.media_link ?? msg.url ?? null,
     caption: msg.caption ?? null,
-    template_name: msg.template_name ?? msg.template ?? null,
+    template_name: type === "template" ? templateName : null,
+    sent_by: msg.send_by || null,
     timestamp: tsMs,
     timestamp_formatted: tsMs ? new Date(tsMs).toISOString() : null,
     status: msg.status ?? null,
@@ -151,7 +188,7 @@ async function main() {
 
   const rawMessages = Array.isArray(result.data)
     ? result.data
-    : (result.data?.messages ?? result.data?.items ?? result.data?.conversation ?? []);
+    : (result.data?.items ?? result.data?.messages ?? result.data?.conversation ?? []);
 
   const messages = rawMessages.map(normaliseMessage);
 
@@ -161,11 +198,12 @@ async function main() {
     for (const msg of messages) {
       const time = msg.timestamp_formatted ? new Date(msg.timestamp_formatted).toLocaleString() : "?";
       const dir = msg.direction === "inbound" ? "←" : "→";
-      const content = msg.text?.slice(0, 60)
-        ?? msg.template_name
-        ?? msg.media_link?.slice(0, 60)
+      const who = msg.direction === "inbound" ? "Contact" : (msg.sent_by ?? "Team");
+      const content = msg.text?.slice(0, 80)
+        ?? (msg.template_name ? `[template: ${msg.template_name}]` : null)
+        ?? (msg.media_link ? `[${msg.type}: ${msg.media_link.slice(0, 60)}]` : null)
         ?? `[${msg.type}]`;
-      process.stderr.write(`  ${dir} [${time}] ${content}\n`);
+      process.stderr.write(`  ${dir} [${time}] (${who}) ${content}\n`);
     }
     process.stderr.write("\n");
   }
