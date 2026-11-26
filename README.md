@@ -11,10 +11,11 @@ The plugin routes also connect the MCP server; the skill-only routes explain how
 | Where | How |
 | --- | --- |
 | Claude Code (recommended there) | `/plugin marketplace add Whatsable/whatsapp-business-agent-skills`, then `/plugin install whatsable@whatsable` |
-| Any agent, Cursor and Codex included | `npx skills add Whatsable/whatsapp-business-agent-skills` (add `-g` for every project) |
+| Codex (connects the MCP server too) | `codex plugin marketplace add Whatsable/whatsapp-business-agent-skills`, then `codex plugin add whatsable --marketplace whatsable` and `codex mcp login whatsable` |
+| Any agent, Cursor included | `npx skills add Whatsable/whatsapp-business-agent-skills` (add `-g` for every project) |
 | By hand | Copy the whole `skills/whatsable/` folder into your agent's skills folder |
 
-The Claude Code plugin also connects the MCP server. With the other routes, connect it in your agent:
+The Claude Code and Codex plugins also connect the MCP server. With the other routes, connect it in your agent:
 the skill's `references/connect.md` says how. `plugin.json` and `mcp.json` describe the same plugin in
 the Agent Plugins format.
 
@@ -29,9 +30,11 @@ Pick one route per agent: the plugin and `npx skills` together install the skill
 - 6 playbooks by business, and 9 example inputs checked against their tools.
 
 ```text
+.agents/plugins/marketplace.json
 .claude-plugin/icon.png
 .claude-plugin/marketplace.json
 .claude-plugin/plugin.json
+.codex-plugin/plugin.json
 .github/workflows/validate.yml
 .mcp.json
 CHANGELOG.md
@@ -56,6 +59,7 @@ skills/whatsable/references/workflows/ (24 files)
 
 - `npx skills update` for the `skills` CLI.
 - Claude Code updates the plugin on its own, or with `/plugin update whatsable`.
+- Codex: `codex plugin marketplace upgrade whatsable`.
 
 The reference files follow the product: a new MCP tool, workflow or docs page reaches this repository on
 the next Whatsable release, with no new version. The version in `CHANGELOG.md` covers the hand-written

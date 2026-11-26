@@ -26,11 +26,15 @@ jobs:
           test "$(printf '%s\n' "$out" | grep -c 'Found [0-9]* warning')" = 2
           test "$(printf '%s\n' "$out" | grep -c 'No version specified')" = 2
           printf '%s\n' "$out" | grep -q 'These checks found nothing to report'
+      # The CLI colours its output in CI ("Found ESC[32m1ESC[39m skill"), so the colour codes are
+      # stripped before the text is matched.
       - name: Exactly one skill for the skills CLI
         env:
           DO_NOT_TRACK: '1'
+          NO_COLOR: '1'
+          FORCE_COLOR: '0'
         run: |
-          out="$(npx -y skills@1.9.0 add . --list)"
+          out="$(npx -y skills@1.9.0 add . --list | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g')"
           echo "$out"
           printf '%s\n' "$out" | grep -q 'Found 1 skill'
           printf '%s\n' "$out" | grep -qx '[│ ]*whatsable'
