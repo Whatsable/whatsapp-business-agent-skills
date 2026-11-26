@@ -1,0 +1,7 @@
+{
+  "conversation_id": "<conversation id from list_conversations>",
+  "template": { "name": "appointment_reminder", "language": "en_US", "variables": { "1": "Maria", "2": "Tuesday 14 October", "3": "10:30" } },
+  "send_at": "2026-10-13T09:00:00-03:00",
+  "time_zone": "America/Sao_Paulo",
+  "send_if": { "no_reply": "since_last_message" }
+}

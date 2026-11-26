@@ -1,0 +1,38 @@
+# Generated from the Whatsable product sources. Do not edit: changes are overwritten.
+name: validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Not --strict: the Claude Code manifests carry no version on purpose, so users follow the
+      # repository's commits, and --strict turns that one warning into a failure. Every other
+      # warning still fails: the output must hold exactly the two version warnings.
+      - name: Claude Code plugin manifests
+        run: |
+          out="$(npx -y @anthropic-ai/claude-code@2.1.332 plugin validate . 2>&1)"
+          echo "$out"
+          test "$(printf '%s\n' "$out" | grep -c 'Found [0-9]* warning')" = 2
+          test "$(printf '%s\n' "$out" | grep -c 'No version specified')" = 2
+          printf '%s\n' "$out" | grep -q 'These checks found nothing to report'
+      - name: Exactly one skill for the skills CLI
+        env:
+          DO_NOT_TRACK: '1'
+        run: |
+          out="$(npx -y skills@1.9.0 add . --list)"
+          echo "$out"
+          printf '%s\n' "$out" | grep -q 'Found 1 skill'
+          printf '%s\n' "$out" | grep -qx '[│ ]*whatsable'
+      # The Agent Skills reference validator (skills-ref) joins here once its pinned install is
+      # settled (plan unknown U6). The monorepo's tests check the same rules before every publish.

@@ -1,0 +1,7 @@
+{
+  "display_name": "Login code",
+  "language": "en_US",
+  "category": "authentication",
+  "authentication": { "add_security_recommendation": true, "code_expiration_minutes": 10 },
+  "buttons": [{ "type": "otp_copy_code", "text": "Copy code" }]
+}

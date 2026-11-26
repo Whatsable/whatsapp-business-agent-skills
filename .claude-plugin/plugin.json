@@ -1,0 +1,22 @@
+{
+  "name": "whatsable",
+  "displayName": "Whatsable",
+  "description": "WhatsApp Business through Whatsable: the Whatsable MCP server and a skill that knows every workflow, tool, WhatsApp rule and app setting.",
+  "author": {
+    "name": "Whatsable",
+    "url": "https://docs.whatsable.app"
+  },
+  "homepage": "https://docs.whatsable.app/mcp/agent-skill",
+  "repository": "https://github.com/Whatsable/whatsapp-business-agent-skills",
+  "privacyPolicyUrl": "https://console.whatsable.app/privacy-policy",
+  "icon": "./.claude-plugin/icon.png",
+  "keywords": [
+    "whatsapp",
+    "whatsapp-business",
+    "mcp",
+    "messaging",
+    "templates",
+    "broadcasts",
+    "ai-agent"
+  ]
+}

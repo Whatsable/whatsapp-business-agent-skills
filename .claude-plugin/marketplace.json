@@ -1,0 +1,21 @@
+{
+  "name": "whatsable",
+  "owner": {
+    "name": "Whatsable",
+    "url": "https://docs.whatsable.app"
+  },
+  "description": "The Whatsable plugin for Claude Code.",
+  "plugins": [
+    {
+      "name": "whatsable",
+      "source": "./",
+      "description": "WhatsApp Business through Whatsable: the MCP server and its skill.",
+      "category": "productivity",
+      "tags": [
+        "whatsapp",
+        "mcp",
+        "messaging"
+      ]
+    }
+  ]
+}

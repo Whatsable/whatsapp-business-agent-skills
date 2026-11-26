@@ -1,0 +1,30 @@
+{
+  "name": "whatsapp-business-agent-skills",
+  "tagline": "Work with WhatsApp Business through Whatsable and its MCP server",
+  "description": "One skill that connects an AI agent to the Whatsable MCP server and teaches it WhatsApp's rules: the 24-hour window, template approval, the AI agent and human handoff, and number-bound access. It does every task the server supports and guides the person through the rest of the Whatsable app.",
+  "category": "productivity",
+  "tags": [
+    "whatsapp",
+    "whatsable",
+    "mcp",
+    "messaging",
+    "chat",
+    "templates",
+    "broadcasts",
+    "ai-agent",
+    "handoff"
+  ],
+  "version": "2.0.0",
+  "author": "whatsable",
+  "license": "Proprietary",
+  "homepage": "https://docs.whatsable.app/mcp/agent-skill",
+  "repository": "https://github.com/Whatsable/whatsapp-business-agent-skills",
+  "requires": {},
+  "env": [
+    {
+      "name": "WHATSABLE_API_KEY",
+      "description": "Optional. A Whatsable API key, for agents that cannot sign in with OAuth. An owner or an admin creates it under API keys.",
+      "required": false
+    }
+  ]
+}

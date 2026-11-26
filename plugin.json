@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "whatsable",
+  "version": "2.0.0",
+  "description": "WhatsApp Business through Whatsable: the Whatsable MCP server and a skill that knows every workflow, tool, WhatsApp rule and app setting.",
+  "author": {
+    "name": "Whatsable",
+    "url": "https://docs.whatsable.app"
+  },
+  "homepage": "https://docs.whatsable.app/mcp/agent-skill",
+  "repository": "https://github.com/Whatsable/whatsapp-business-agent-skills",
+  "keywords": [
+    "whatsapp",
+    "whatsapp-business",
+    "mcp",
+    "messaging"
+  ]
+}

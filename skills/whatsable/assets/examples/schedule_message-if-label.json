@@ -1,0 +1,7 @@
+{
+  "to": "+5511999990000",
+  "from": "<number id from list_numbers>",
+  "template": { "name": "autumn_sale", "language": "en_US", "variables": { "header_1": "Maria", "1": "Maria", "2": "20%" } },
+  "send_at": "2026-10-20T10:00:00-03:00",
+  "send_if": { "labels": { "include": ["VIP"] } }
+}

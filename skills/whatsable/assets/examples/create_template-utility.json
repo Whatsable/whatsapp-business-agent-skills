@@ -1,0 +1,11 @@
+{
+  "display_name": "Appointment reminder",
+  "language": "en_US",
+  "category": "utility",
+  "body": "Hi {{1}}, this is a reminder of your appointment on {{2}} at {{3}}. Reply YES to confirm or NO to cancel.",
+  "body_examples": ["Maria", "Tuesday 14 October", "10:30"],
+  "buttons": [
+    { "type": "quick_reply", "text": "YES" },
+    { "type": "quick_reply", "text": "NO" }
+  ]
+}

@@ -1,0 +1,33 @@
+<!-- Generated from the Whatsable product sources. Do not edit: changes are overwritten. -->
+
+# WhatsApp errors: template
+
+A failed message names Meta's code. Find it below; a code that is not listed falls back to its family.
+
+**The family:** WhatsApp refused the template: name, language, status, or variables do not match an approved template. **Fix:** Use an approved template, the exact name and language, and the same number of variables the template declares. **Who fixes it:** Whatsable. **Retry helps:** no.
+
+| Code | Title | Meaning | How to fix | Who fixes it | Retry helps |
+|---|---|---|---|---|---|
+| `132000` | Template parameter count mismatch | The number of variables sent does not match the approved template. | Count every {{n}} in the body, header, and buttons, and send exactly that many values. | Whatsable | no |
+| `132001` | Template does not exist | WhatsApp has no approved template with this name and language on the connected account. | Use the exact approved template name and language (en and en_US are different). Check Templates in Whatsable. Guide: https://docs.whatsable.app/whatsapp-error-132001 | Whatsable | no |
+| `132005` | Template hydrated text is too long | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `132007` | Template format character policy | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `132012` | Template parameter format mismatch | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `132015` | Template is paused | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `132016` | Template is disabled | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `132018` | Template is not approved for this use | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `132068` | Flow is blocked | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `132069` | Flow is throttled | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | yes |
+| `200005` | Template insights unavailable | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `200006` | Cannot disable template insights | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `200007` | Template insights not enabled | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388019` | Message template limit exceeded | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388039` | Template status cannot be changed | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388040` | Character limit exceeded | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388047` | Message header format is incorrect | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388072` | Message body format is incorrect | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388073` | Message footer format is incorrect | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388293` | Parameters words ratio exceeds limit | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+| `2388299` | Leading or trailing parameters not allowed | WhatsApp refused the template: name, language, status, or variables do not match an approved template. | Use an approved template, the exact name and language, and the same number of variables the template declares. | Whatsable | no |
+
+Meta's reference: https://developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes

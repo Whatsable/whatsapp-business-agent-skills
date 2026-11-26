@@ -1,0 +1,6 @@
+{
+  "conversation_id": "<conversation id from list_conversations>",
+  "text": { "body": "Hi Maria, did you get a chance to look at the quote we sent?" },
+  "send_at": "2026-10-14T15:00:00-03:00",
+  "send_if": { "no_reply": "24h", "labels": { "exclude": ["Closed"] } }
+}

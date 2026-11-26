@@ -1,0 +1,13 @@
+{
+  "display_name": "Autumn sale",
+  "language": "en_US",
+  "category": "marketing",
+  "header": { "type": "text", "text": "Autumn sale, {{1}}", "example": "Maria" },
+  "body": "Hi {{1}}, our autumn sale starts today: {{2}} off everything until Sunday. Reply STOP to stop these messages.",
+  "body_examples": ["Maria", "20%"],
+  "footer": "Acme Store",
+  "buttons": [
+    { "type": "url", "text": "Shop now", "url": "https://example.com/sale" },
+    { "type": "quick_reply", "text": "Stop promotions" }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "whatsable": {
+      "type": "http",
+      "url": "https://api.whatsable.app/mcp"
+    }
+  }
+}

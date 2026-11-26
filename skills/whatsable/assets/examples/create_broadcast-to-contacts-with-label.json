@@ -1,0 +1,12 @@
+{
+  "name": "Autumn sale to VIP",
+  "from": "<number id from list_numbers>",
+  "template": { "name": "autumn_sale", "language": "en_US" },
+  "variables": { "2": "20%" },
+  "recipients": [
+    { "to": "+5511999990000", "variables": { "header_1": "Maria", "1": "Maria" } },
+    { "to": "+5511999990001", "variables": { "header_1": "João", "1": "João" } }
+  ],
+  "scheduled_at": "2026-10-20T10:00:00-03:00",
+  "labels": ["Autumn sale sent"]
+}

@@ -1,0 +1,9 @@
+{
+  "conversation_id": "<conversation id from list_conversations>",
+  "body": "Thanks for writing to us. What can we help you with?",
+  "buttons": [
+    { "id": "order_status", "title": "Order status" },
+    { "id": "returns", "title": "Returns" },
+    { "id": "talk_to_us", "title": "Talk to a person" }
+  ]
+}
